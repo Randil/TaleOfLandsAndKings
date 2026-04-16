@@ -1,6 +1,6 @@
-import type { World, WorldConfig, Hex, Terrain, River, RiverEdge } from '../types/world';
-import { makeRng, rngInt, rngPick } from './rng';
-import { hexKey, hexNeighbors, hexesInRect, NEIGHBOR_DIRS } from './hexMath';
+import type { World, WorldConfig, Hex, Terrain, River } from '../types/world';
+import { makeRng, rngInt, rngPick, rngShuffle } from './rng';
+import { hexKey, hexNeighbors, hexesInRect, hexCornerTriplets, adjacentCornerTriplets } from './hexMath';
 
 // Elevation ladder: each time a hex is "selected" it moves one step up
 const ELEVATION: Record<Terrain, Terrain> = {
@@ -163,41 +163,6 @@ function detectLakes(
 
 // ─── River Generation ─────────────────────────────────────────────────────────
 
-// Returns the direction index i such that B = A + NEIGHBOR_DIRS[i]
-function edgeIndex(aq: number, ar: number, bq: number, br: number): number {
-  const dq = bq - aq, dr = br - ar;
-  return NEIGHBOR_DIRS.findIndex(([ddq, ddr]) => ddq === dq && ddr === dr);
-}
-
-function normalizedEdgeKey(q1: number, r1: number, q2: number, r2: number): string {
-  const k1 = hexKey(q1, r1), k2 = hexKey(q2, r2);
-  return k1 < k2 ? `${k1}|${k2}` : `${k2}|${k1}`;
-}
-
-// Canonical key for the hex corner shared by three hexes
-function vertexKey(
-  q1: number, r1: number,
-  q2: number, r2: number,
-  q3: number, r3: number,
-): string {
-  return [hexKey(q1, r1), hexKey(q2, r2), hexKey(q3, r3)].sort().join('|');
-}
-
-// Given edge (hA, hB) entered from cPrev, returns the exit vertex key
-function exitVertexKey(
-  hAq: number, hAr: number,
-  hBq: number, hBr: number,
-  cPrevQ: number, cPrevR: number,
-): string {
-  const i = edgeIndex(hAq, hAr, hBq, hBr);
-  const [dpq, dpr] = NEIGHBOR_DIRS[(i - 1 + 6) % 6];
-  const [dnq, dnr] = NEIGHBOR_DIRS[(i + 1) % 6];
-  const thirdI   = [hAq + dpq, hAr + dpr] as [number, number];
-  const thirdIP1 = [hAq + dnq, hAr + dnr] as [number, number];
-  const [cNextQ, cNextR] = (thirdI[0] === cPrevQ && thirdI[1] === cPrevR) ? thirdIP1 : thirdI;
-  return vertexKey(hAq, hAr, hBq, hBr, cNextQ, cNextR);
-}
-
 function generateRivers(
   hexes: Record<string, Hex>,
   coordSet: Set<string>,
@@ -206,10 +171,21 @@ function generateRivers(
   rng: () => number,
 ): River[] {
   const { minLandmassForRiver, hexesPerRiver } = config;
-  const rivers: River[] = [];
-  const allRiverEdges = new Set<string>();
 
-  // Find connected landmasses via BFS over non-water hexes
+  // Build corner map: cornerKey → sorted [h1k, h2k, h3k]
+  const cornerMap = new Map<string, [string, string, string]>();
+  for (const [q, r] of allCoords) {
+    for (const triplet of hexCornerTriplets(q, r)) {
+      const key = triplet.join('|');
+      if (!cornerMap.has(key)) cornerMap.set(key, triplet);
+    }
+  }
+
+  const getTerrain = (k: string): Terrain => hexes[k]?.terrain ?? 'water';
+  const isSource   = (t: Terrain) => t === 'mountains' || t === 'hills' || t === 'lake';
+  const isTerminal = (t: Terrain) => t === 'water' || t === 'lake';
+
+  // Find connected landmasses (for minLandmassForRiver gate)
   const globalVisited = new Set<string>();
   const landmasses: [number, number][][] = [];
 
@@ -222,7 +198,6 @@ function generateRivers(
     const mass: [number, number][] = [];
     const queue: [number, number][] = [[q, r]];
     globalVisited.add(key);
-
     let qi = 0;
     while (qi < queue.length) {
       const [cq, cr] = queue[qi++];
@@ -237,30 +212,44 @@ function generateRivers(
         }
       }
     }
-
     landmasses.push(mass);
   }
+
+  const allRiverCorners = new Set<string>();
+  const rivers: River[] = [];
 
   for (const mass of landmasses) {
     if (mass.length < minLandmassForRiver) continue;
 
-    const riverCount = Math.max(1, Math.floor(mass.length / hexesPerRiver));
+    const targetCount = Math.max(1, Math.floor(mass.length / hexesPerRiver));
 
-    for (let ri = 0; ri < riverCount; ri++) {
-      const sources = mass.filter(([q, r]) => {
-        const t = hexes[hexKey(q, r)].terrain;
-        return t === 'mountains' || t === 'hills' || t === 'lake';
-      });
-      if (sources.length === 0) continue;
+    // Collect valid start corners for this landmass: touch a source terrain,
+    // not already on a river, and have at least one non-terminal neighbor
+    // (otherwise they'd produce a trivially short river)
+    const massKeySet = new Set(mass.map(([q, r]) => hexKey(q, r)));
+    const candidates: string[] = [];
 
-      const [sq, sr] = rngPick(rng, sources);
-      const riverEdges = traceRiver(sq, sr, hexes, coordSet, allRiverEdges, rng);
+    for (const [ck, hexKeys] of cornerMap) {
+      if (allRiverCorners.has(ck)) continue;
+      if (!hexKeys.some(k => massKeySet.has(k))) continue;
+      if (!hexKeys.some(k => isSource(getTerrain(k)))) continue;
+      candidates.push(ck);
+    }
 
-      if (riverEdges.length > 0) {
-        for (const e of riverEdges) {
-          allRiverEdges.add(normalizedEdgeKey(e.q1, e.r1, e.q2, e.r2));
-        }
-        rivers.push({ id: `river_${rivers.length}`, edges: riverEdges });
+    const shuffled = rngShuffle(rng, candidates);
+    let startIdx = 0;
+    let riversForMass = 0;
+
+    while (riversForMass < targetCount && startIdx < shuffled.length) {
+      const startKey = shuffled[startIdx++];
+      if (allRiverCorners.has(startKey)) continue;
+
+      const corners = traceRiverCorners(startKey, cornerMap, allRiverCorners, getTerrain, isTerminal, rng);
+
+      if (corners.length >= 3) {
+        for (const ck of corners) allRiverCorners.add(ck);
+        rivers.push({ id: `river_${rivers.length}`, corners });
+        riversForMass++;
       }
     }
   }
@@ -268,100 +257,49 @@ function generateRivers(
   return rivers;
 }
 
-// Traces a river path as a sequence of hex edges where each consecutive
-// pair of edges shares exactly one vertex (hex corner).
-//
-// State: current edge (hA, hB) + cPrev (the third hex at the entry vertex).
-// At each step the exit vertex is the other end of the edge; its third hex
-// cNext is whichever of the two corner-hexes is NOT cPrev.
-// The two candidate next edges are hA-cNext and hB-cNext.
-// After choosing one (say hA-cNext), cPrev_next = hB (the dropped hex).
-function traceRiver(
-  sq: number, sr: number,
-  hexes: Record<string, Hex>,
-  coordSet: Set<string>,
-  allRiverEdges: Set<string>,
+function traceRiverCorners(
+  startKey: string,
+  cornerMap: Map<string, [string, string, string]>,
+  allRiverCorners: Set<string>,
+  getTerrain: (k: string) => Terrain,
+  isTerminal: (t: Terrain) => boolean,
   rng: () => number,
-): RiverEdge[] {
-  // Initial edge: source hex + a random non-water land neighbor
-  const neighbors = hexNeighbors(sq, sr).filter(([nq, nr]) => {
-    const k = hexKey(nq, nr);
-    const t = hexes[k]?.terrain;
-    return coordSet.has(k) && t !== 'water' && t !== 'lake';
-  });
-  if (neighbors.length === 0) return [];
+): string[] {
+  const corners: string[] = [startKey];
+  const visited = new Set<string>([startKey]);
+  let currentKey = startKey;
 
-  const [initNQ, initNR] = rngPick(rng, neighbors);
+  while (corners.length < 300) {
+    const currentHexes = cornerMap.get(currentKey);
+    if (!currentHexes) break;
 
-  let hAq = sq, hAr = sr;
-  let hBq = initNQ, hBr = initNR;
+    const adjTriplets = adjacentCornerTriplets(currentHexes[0], currentHexes[1], currentHexes[2]);
+    const adjacent = adjTriplets.map(trip => ({ key: trip.join('|'), hexKeys: trip }));
 
-  // Pick an initial cPrev to set flow direction (random choice between the two options)
-  const iInit = edgeIndex(hAq, hAr, hBq, hBr);
-  const [d0q, d0r] = NEIGHBOR_DIRS[(iInit - 1 + 6) % 6];
-  const [d1q, d1r] = NEIGHBOR_DIRS[(iInit + 1) % 6];
-  let cPrevQ: number, cPrevR: number;
-  if (rng() < 0.5) { cPrevQ = hAq + d0q; cPrevR = hAr + d0r; }
-  else              { cPrevQ = hAq + d1q; cPrevR = hAr + d1r; }
+    // Exclude corners already in this river (no cycles)
+    const nonCyclic = adjacent.filter(a => !visited.has(a.key));
+    if (nonCyclic.length === 0) break;
 
-  const edges: RiverEdge[] = [];
-  const usedEdges = new Set<string>();
-  const visitedVertices = new Set<string>();
+    // Terminate: any neighbor touches water or lake
+    const terminals = nonCyclic.filter(a => a.hexKeys.some(k => isTerminal(getTerrain(k))));
+    if (terminals.length > 0) {
+      corners.push(rngPick(rng, terminals).key);
+      break;
+    }
 
-  // Mark the entry vertex of the first edge so the river never returns to its source
-  visitedVertices.add(vertexKey(hAq, hAr, hBq, hBr, cPrevQ, cPrevR));
+    // Terminate: any neighbor is already on another river (tributary junction)
+    const junctions = nonCyclic.filter(a => allRiverCorners.has(a.key));
+    if (junctions.length > 0) {
+      corners.push(rngPick(rng, junctions).key);
+      break;
+    }
 
-  while (edges.length < 300) {
-    const eKey = normalizedEdgeKey(hAq, hAr, hBq, hBr);
-    if (usedEdges.has(eKey) || allRiverEdges.has(eKey)) break;
-    usedEdges.add(eKey);
-    edges.push({ q1: hAq, r1: hAr, q2: hBq, r2: hBr });
-
-    // Find cNext: the third hex at the exit vertex
-    const i = edgeIndex(hAq, hAr, hBq, hBr);
-    const [dpq, dpr] = NEIGHBOR_DIRS[(i - 1 + 6) % 6];
-    const [dnq, dnr] = NEIGHBOR_DIRS[(i + 1) % 6];
-    const thirdI   = [hAq + dpq, hAr + dpr] as [number, number];
-    const thirdIP1 = [hAq + dnq, hAr + dnr] as [number, number];
-
-    const [cNextQ, cNextR] = (thirdI[0] === cPrevQ && thirdI[1] === cPrevR)
-      ? thirdIP1 : thirdI;
-
-    // Terminate when cNext is off-map or water
-    if (!coordSet.has(hexKey(cNextQ, cNextR))) break;
-    const cNextTerrain = hexes[hexKey(cNextQ, cNextR)]?.terrain;
-    if (cNextTerrain === 'water' || cNextTerrain === 'lake') break;
-
-    // Check the exit vertex — if already visited the river would cycle
-    const vExitKey = vertexKey(hAq, hAr, hBq, hBr, cNextQ, cNextR);
-    if (visitedVertices.has(vExitKey)) break;
-    visitedVertices.add(vExitKey);
-
-    // Two candidate next edges: hA-cNext or hB-cNext
-    // Filter: edge not already used AND the candidate's own exit vertex not yet visited
-    // (the "go the other way" rule — prefer the direction that doesn't revisit a corner)
-    const candidates: Array<[number, number, number, number]> = (
-      [[hAq, hAr, cNextQ, cNextR], [hBq, hBr, cNextQ, cNextR]] as Array<[number, number, number, number]>
-    ).filter(([nAq, nAr, nBq, nBr]) => {
-      const k = normalizedEdgeKey(nAq, nAr, nBq, nBr);
-      if (usedEdges.has(k) || allRiverEdges.has(k)) return false;
-      // cPrev for the candidate = whichever of hA/hB is not nA
-      const [cpq, cpr] = (nAq === hAq && nAr === hAr) ? [hBq, hBr] : [hAq, hAr];
-      return !visitedVertices.has(exitVertexKey(nAq, nAr, nBq, nBr, cpq, cpr));
-    });
-
-    if (candidates.length === 0) break;
-
-    const [nAq, nAr, nBq, nBr] = rngPick(rng, candidates);
-
-    // cPrev for next step = the hex from {hA, hB} that is NOT nA
-    const keepA = nAq === hAq && nAr === hAr;
-    cPrevQ = keepA ? hBq : hAq;
-    cPrevR = keepA ? hBr : hAr;
-
-    hAq = nAq; hAr = nAr;
-    hBq = nBq; hBr = nBr;
+    // Normal step: random
+    const next = rngPick(rng, nonCyclic);
+    corners.push(next.key);
+    visited.add(next.key);
+    currentKey = next.key;
   }
 
-  return edges;
+  return corners;
 }

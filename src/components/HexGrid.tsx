@@ -1,6 +1,6 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import type { World, Terrain } from '../types/world';
-import { hexToPixel, hexCorners, HEX_SIZE, hexBounds, sharedEdgePixels, hexKey } from '../game/hexMath';
+import { hexToPixel, hexCorners, HEX_SIZE, hexBounds, hexCornerToPixel, hexKey } from '../game/hexMath';
 
 const TERRAIN_COLORS: Record<Terrain, string> = {
   plains:    '#c8d98a',
@@ -36,14 +36,15 @@ export function HexGrid({ world }: Props) {
     setTransform({ x: 0, y: 0, scale: 1 });
   }, [world]);
 
-  // Build lookup: hexKey → indices of rivers that have an edge touching that hex
+  // Build lookup: hexKey → indices of rivers whose corners touch that hex
   const riversByHexKey = useMemo(() => {
     const map = new Map<string, number[]>();
     world.rivers.forEach((river, ri) => {
-      for (const edge of river.edges) {
-        for (const k of [hexKey(edge.q1, edge.r1), hexKey(edge.q2, edge.r2)]) {
-          if (!map.has(k)) map.set(k, []);
-          map.get(k)!.push(ri);
+      for (const cornerKey of river.corners) {
+        for (const hk of cornerKey.split('|')) {
+          if (!map.has(hk)) map.set(hk, []);
+          const arr = map.get(hk)!;
+          if (arr[arr.length - 1] !== ri) arr.push(ri);
         }
       }
     });
@@ -119,45 +120,48 @@ export function HexGrid({ world }: Props) {
           })}
 
           {/* Render rivers (normal) */}
-          {world.rivers.map(river =>
-            river.edges.map((edge, ei) => {
-              const seg = sharedEdgePixels(edge.q1, edge.r1, edge.q2, edge.r2);
-              if (!seg) return null;
-              return (
-                <line
-                  key={`${river.id}-${ei}`}
-                  x1={seg.x1} y1={seg.y1}
-                  x2={seg.x2} y2={seg.y2}
-                  stroke="#7ec8e3"
-                  strokeWidth={1.5}
-                  strokeLinecap="round"
-                />
-              );
-            })
-          )}
+          {world.rivers.map(river => {
+            if (river.corners.length < 2) return null;
+            const pts = river.corners.map(ck => {
+              const [h1, h2, h3] = ck.split('|');
+              const { x, y } = hexCornerToPixel(h1, h2, h3);
+              return `${x},${y}`;
+            }).join(' ');
+            return (
+              <polyline
+                key={river.id}
+                points={pts}
+                fill="none"
+                stroke="#7ec8e3"
+                strokeWidth={1.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            );
+          })}
 
           {/* Render highlighted rivers on top */}
-          {highlightedRiverIndices.size > 0 && (() => {
-            const highlighted = [...highlightedRiverIndices];
-            return highlighted.map((ri, colorIdx) => {
-              const river = world.rivers[ri];
-              const color = RIVER_HIGHLIGHT_COLORS[colorIdx % RIVER_HIGHLIGHT_COLORS.length];
-              return river.edges.map((edge, ei) => {
-                const seg = sharedEdgePixels(edge.q1, edge.r1, edge.q2, edge.r2);
-                if (!seg) return null;
-                return (
-                  <line
-                    key={`highlight-${river.id}-${ei}`}
-                    x1={seg.x1} y1={seg.y1}
-                    x2={seg.x2} y2={seg.y2}
-                    stroke={color}
-                    strokeWidth={2}
-                    strokeLinecap="round"
-                  />
-                );
-              });
-            });
-          })()}
+          {highlightedRiverIndices.size > 0 && [...highlightedRiverIndices].map((ri, colorIdx) => {
+            const river = world.rivers[ri];
+            if (river.corners.length < 2) return null;
+            const color = RIVER_HIGHLIGHT_COLORS[colorIdx % RIVER_HIGHLIGHT_COLORS.length];
+            const pts = river.corners.map(ck => {
+              const [h1, h2, h3] = ck.split('|');
+              const { x, y } = hexCornerToPixel(h1, h2, h3);
+              return `${x},${y}`;
+            }).join(' ');
+            return (
+              <polyline
+                key={`highlight-${river.id}`}
+                points={pts}
+                fill="none"
+                stroke={color}
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            );
+          })}
         </g>
       </g>
     </svg>
