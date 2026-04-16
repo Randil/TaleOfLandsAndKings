@@ -33,7 +33,8 @@ export type HexCornerKey = string;
 export interface River {
   id: string;
   corners: HexCornerKey[]; // ordered path — each consecutive pair shares a hex edge
-  largeFromIndex?: number; // index into corners from which river is "large"; 0 = entire river
+  largeFromIndex?: number;     // index into corners from which river is "large"; 0 = entire river
+  veryLargeFromIndex?: number; // index into corners from which river is "very large" (second tributary junction)
 }
 
 export type MapGenAlgorithm = "landmass-growth" | "landmass-growth-v3";

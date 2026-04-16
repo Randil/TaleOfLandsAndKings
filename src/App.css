@@ -90,6 +90,103 @@ body,
   border-top: 1px solid #2a2a3a;
 }
 
+.world-gen-panel select {
+  background: #0d0d1a;
+  border: 1px solid #2a2a3a;
+  color: #e0d8c8;
+  padding: 6px 8px;
+  font-size: 14px;
+  border-radius: 3px;
+  width: 100%;
+  font-family: inherit;
+}
+
+.btn-return {
+  background: #1a1a2e !important;
+  border-color: #4a4a6a !important;
+  color: #a09080 !important;
+  font-size: 12px !important;
+}
+
+/* ── Panel sections (log, inspector) ── */
+.panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.panel-section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #5a5a7a;
+  border-top: 1px solid #2a2a3a;
+  padding-top: 8px;
+}
+
+/* ── Generation log ── */
+.gen-log {
+  max-height: 200px;
+  overflow-y: auto;
+  background: #0a0a14;
+  border: 1px solid #2a2a3a;
+  border-radius: 3px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.gen-log__entry {
+  font-size: 10px;
+  color: #7a8a7a;
+  line-height: 1.5;
+  font-family: "Courier New", monospace;
+  word-break: break-word;
+}
+
+.gen-log__empty {
+  font-size: 10px;
+  color: #3a3a5a;
+  font-style: italic;
+}
+
+/* ── Hex inspector ── */
+.hex-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hex-inspector__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.hex-inspector__label {
+  font-size: 10px;
+  color: #5a5a7a;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+
+.hex-inspector__value {
+  font-size: 11px;
+  color: #c0b8a8;
+  text-align: right;
+  word-break: break-all;
+}
+
+.hex-inspector__placeholder {
+  font-size: 10px;
+  color: #3a3a5a;
+  font-style: italic;
+}
+
 .world-gen-panel .error {
   font-size: 11px;
   color: #c06060;

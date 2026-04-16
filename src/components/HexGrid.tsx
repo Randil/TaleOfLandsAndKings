@@ -34,44 +34,50 @@ function drawRiverSegments(
   ctx: CanvasRenderingContext2D,
   pts: { x: number; y: number }[],
   lfi: number | undefined,
+  vlfi: number | undefined,
   smallWidth: number,
   largeWidth: number,
+  veryLargeWidth: number,
 ): void {
+  // Helper to draw a polyline from index `from` to `to` (inclusive)
+  const stroke = (from: number, to: number, width: number) => {
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(pts[from].x, pts[from].y);
+    for (let i = from + 1; i <= to; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+  };
+
+  const end = pts.length - 1;
+
   if (lfi === undefined) {
     // Entirely small
-    ctx.lineWidth = smallWidth;
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    ctx.stroke();
-  } else if (lfi === 0) {
+    stroke(0, end, smallWidth);
+  } else if (lfi === 0 && vlfi === undefined) {
     // Entirely large
-    ctx.lineWidth = largeWidth;
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    ctx.stroke();
+    stroke(0, end, largeWidth);
+  } else if (lfi === 0 && vlfi !== undefined) {
+    // Large from start, then very large from vlfi
+    stroke(0, vlfi, largeWidth);
+    stroke(vlfi, end, veryLargeWidth);
+  } else if (vlfi === undefined) {
+    // Small headwater → large
+    stroke(0, lfi, smallWidth);
+    stroke(lfi, end, largeWidth);
   } else {
-    // Small headwater section
-    ctx.lineWidth = smallWidth;
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i <= lfi; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    ctx.stroke();
-    // Large section from junction onward
-    ctx.lineWidth = largeWidth;
-    ctx.beginPath();
-    ctx.moveTo(pts[lfi].x, pts[lfi].y);
-    for (let i = lfi + 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    ctx.stroke();
+    // Small headwater → large → very large
+    stroke(0, lfi, smallWidth);
+    stroke(lfi, vlfi, largeWidth);
+    stroke(vlfi, end, veryLargeWidth);
   }
 }
 
 interface Props {
   world: World;
+  onHoverHex?: (key: string | null) => void;
 }
 
-export function HexGrid({ world }: Props) {
+export function HexGrid({ world, onHoverHex }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const transformRef = useRef({ x: 0, y: 0, scale: 1 });
   const hoveredHexKeyRef = useRef<string | null>(null);
@@ -169,7 +175,8 @@ export function HexGrid({ world }: Props) {
       const pts = riverPoints[ri];
       if (!pts) continue;
       const lfi = world.rivers[ri].largeFromIndex;
-      drawRiverSegments(ctx, pts, lfi, 1.5, 3);
+      const vlfi = world.rivers[ri].veryLargeFromIndex;
+      drawRiverSegments(ctx, pts, lfi, vlfi, 1.5, 3, 4.5);
     }
 
     // Draw highlighted rivers on top
@@ -180,7 +187,8 @@ export function HexGrid({ world }: Props) {
       ctx.strokeStyle =
         RIVER_HIGHLIGHT_COLORS[colorIdx % RIVER_HIGHLIGHT_COLORS.length];
       const lfi = world.rivers[ri].largeFromIndex;
-      drawRiverSegments(ctx, pts, lfi, 2, 4);
+      const vlfi = world.rivers[ri].veryLargeFromIndex;
+      drawRiverSegments(ctx, pts, lfi, vlfi, 2, 4, 6);
       colorIdx++;
     }
 
@@ -254,6 +262,7 @@ export function HexGrid({ world }: Props) {
       const next = world.hexes[hk] ? hk : null;
       if (next !== hoveredHexKeyRef.current) {
         hoveredHexKeyRef.current = next;
+        onHoverHex?.(next);
         scheduleDraw();
       }
     },
@@ -267,8 +276,9 @@ export function HexGrid({ world }: Props) {
   const onMouseLeave = useCallback(() => {
     dragStart.current = null;
     hoveredHexKeyRef.current = null;
+    onHoverHex?.(null);
     scheduleDraw();
-  }, [scheduleDraw]);
+  }, [scheduleDraw, onHoverHex]);
 
   const onWheel = useCallback(
     (e: React.WheelEvent) => {

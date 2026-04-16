@@ -1,8 +1,10 @@
 import { useWorldStore } from "../store/worldStore";
+import { useUiStore } from "../store/uiStore";
 import { HexGrid } from "./HexGrid";
 
 export function GameMap() {
   const world = useWorldStore((s) => s.world);
+  const setHoveredHexKey = useUiStore((s) => s.setHoveredHexKey);
 
   if (!world) {
     return (
@@ -14,7 +16,7 @@ export function GameMap() {
 
   return (
     <div className="game-map">
-      <HexGrid world={world} />
+      <HexGrid world={world} onHoverHex={setHoveredHexKey} />
     </div>
   );
 }
