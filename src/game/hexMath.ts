@@ -200,6 +200,30 @@ export function hexCornerToPixel(
   };
 }
 
+// Flat-top hex: pixel → nearest axial coords (inverse of hexToPixel)
+export function pixelToHex(
+  x: number,
+  y: number,
+  size: number = HEX_SIZE,
+): { q: number; r: number } {
+  const q = ((2 / 3) * x) / size;
+  const r = ((-1 / 3) * x + (Math.sqrt(3) / 3) * y) / size;
+  // Cube rounding
+  let cx = q,
+    cz = r,
+    cy = -cx - cz;
+  let rx = Math.round(cx),
+    ry = Math.round(cy),
+    rz = Math.round(cz);
+  const dx = Math.abs(rx - cx),
+    dy = Math.abs(ry - cy),
+    dz = Math.abs(rz - cz);
+  if (dx > dy && dx > dz) rx = -ry - rz;
+  else if (dy > dz) ry = -rx - rz;
+  else rz = -rx - ry;
+  return { q: rx, r: rz };
+}
+
 // Compute bounding box of all hex centers (for SVG viewBox)
 export function hexBounds(coords: [number, number][], size: number = HEX_SIZE) {
   let minX = Infinity,

@@ -4,8 +4,8 @@ import { useWorldStore } from "../store/worldStore";
 import type { World, MapGenAlgorithm } from "../types/world";
 
 const ALGORITHMS: { value: MapGenAlgorithm; label: string }[] = [
-  { value: "landmass-growth", label: "Landmass Growth v1" },
-  { value: "landmass-growth-v2", label: "Landmass Growth v2" },
+  { value: "landmass-growth", label: "Landmass Growth" },
+  { value: "landmass-growth-v3", label: "Landmass Growth v3" },
 ];
 
 function isValidWorld(obj: unknown): obj is World {
@@ -26,29 +26,47 @@ function isValidWorld(obj: unknown): obj is World {
 
 export function WorldGenPanel() {
   const { world, setWorld } = useWorldStore();
-  const [seed, setSeed] = useState(() => Math.floor(Math.random() * 999999));
-  const [width, setWidth] = useState(80);
-  const [height, setHeight] = useState(50);
+  const [seed, setSeed] = useState(() =>
+    String(Math.floor(Math.random() * 999999)),
+  );
+  const [width, setWidth] = useState("80");
+  const [height, setHeight] = useState("50");
   const [algorithm, setAlgorithm] =
-    useState<MapGenAlgorithm>("landmass-growth-v2");
+    useState<MapGenAlgorithm>("landmass-growth-v3");
 
   // Algorithm-specific params (shared by both v1 and v2 for now)
-  const [landPct, setLandPct] = useState(35);
-  const [minLandmassForRiver, setMinLandmassForRiver] = useState(5);
-  const [hexesPerRiver, setHexesPerRiver] = useState(30);
+  const [landPct, setLandPct] = useState("35");
+  const [minLandmassForRiver, setMinLandmassForRiver] = useState("5");
+  const [hexesPerRiver, setHexesPerRiver] = useState("30");
 
   const [loadError, setLoadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function handleGenerate() {
+    const resolvedSeed = Math.max(0, parseInt(seed, 10) || 0);
+    const resolvedWidth = Math.min(500, Math.max(10, parseInt(width, 10) || 10));
+    const resolvedHeight = Math.min(
+      500,
+      Math.max(10, parseInt(height, 10) || 10),
+    );
+    const resolvedLandPct = Math.min(90, Math.max(1, parseInt(landPct, 10) || 1));
+    const resolvedMinLandmass = Math.max(
+      1,
+      parseInt(minLandmassForRiver, 10) || 1,
+    );
+    const resolvedHexesPerRiver = Math.max(
+      1,
+      parseInt(hexesPerRiver, 10) || 1,
+    );
+
     const w = generateWorld({
-      seed,
-      width,
-      height,
+      seed: resolvedSeed,
+      width: resolvedWidth,
+      height: resolvedHeight,
       mapGenAlgorithm: algorithm,
-      minLandFraction: landPct / 100,
-      minLandmassForRiver,
-      hexesPerRiver,
+      minLandFraction: resolvedLandPct / 100,
+      minLandmassForRiver: resolvedMinLandmass,
+      hexesPerRiver: resolvedHexesPerRiver,
     });
     setWorld(w);
     setLoadError(null);
@@ -83,13 +101,13 @@ export function WorldGenPanel() {
         }
         setWorld(parsed);
         setLoadError(null);
-        setSeed(parsed.config.seed);
-        setWidth(parsed.config.width);
-        setHeight(parsed.config.height);
+        setSeed(String(parsed.config.seed));
+        setWidth(String(parsed.config.width));
+        setHeight(String(parsed.config.height));
         setAlgorithm(parsed.config.mapGenAlgorithm);
-        setLandPct(Math.round(parsed.config.minLandFraction * 100));
-        setMinLandmassForRiver(parsed.config.minLandmassForRiver);
-        setHexesPerRiver(parsed.config.hexesPerRiver);
+        setLandPct(String(Math.round(parsed.config.minLandFraction * 100)));
+        setMinLandmassForRiver(String(parsed.config.minLandmassForRiver));
+        setHexesPerRiver(String(parsed.config.hexesPerRiver));
       } catch {
         setLoadError(
           "Failed to parse file. Make sure it is a valid JSON world file.",
@@ -112,7 +130,7 @@ export function WorldGenPanel() {
         <input
           type="number"
           value={seed}
-          onChange={(e) => setSeed(Number(e.target.value))}
+          onChange={(e) => setSeed(e.target.value)}
         />
       </label>
 
@@ -121,11 +139,7 @@ export function WorldGenPanel() {
         <input
           type="number"
           value={width}
-          min={10}
-          max={500}
-          onChange={(e) =>
-            setWidth(Math.min(500, Math.max(10, Number(e.target.value))))
-          }
+          onChange={(e) => setWidth(e.target.value)}
         />
       </label>
 
@@ -134,11 +148,7 @@ export function WorldGenPanel() {
         <input
           type="number"
           value={height}
-          min={10}
-          max={500}
-          onChange={(e) =>
-            setHeight(Math.min(500, Math.max(10, Number(e.target.value))))
-          }
+          onChange={(e) => setHeight(e.target.value)}
         />
       </label>
 
@@ -162,11 +172,7 @@ export function WorldGenPanel() {
         <input
           type="number"
           value={landPct}
-          min={1}
-          max={90}
-          onChange={(e) =>
-            setLandPct(Math.min(90, Math.max(1, Number(e.target.value))))
-          }
+          onChange={(e) => setLandPct(e.target.value)}
         />
       </label>
 
@@ -175,10 +181,7 @@ export function WorldGenPanel() {
         <input
           type="number"
           value={minLandmassForRiver}
-          min={1}
-          onChange={(e) =>
-            setMinLandmassForRiver(Math.max(1, Number(e.target.value)))
-          }
+          onChange={(e) => setMinLandmassForRiver(e.target.value)}
         />
       </label>
 
@@ -187,10 +190,7 @@ export function WorldGenPanel() {
         <input
           type="number"
           value={hexesPerRiver}
-          min={1}
-          onChange={(e) =>
-            setHexesPerRiver(Math.max(1, Number(e.target.value)))
-          }
+          onChange={(e) => setHexesPerRiver(e.target.value)}
         />
       </label>
 

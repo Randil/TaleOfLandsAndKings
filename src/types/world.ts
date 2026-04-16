@@ -35,7 +35,7 @@ export interface River {
   corners: HexCornerKey[]; // ordered path — each consecutive pair shares a hex edge
 }
 
-export type MapGenAlgorithm = "landmass-growth" | "landmass-growth-v2";
+export type MapGenAlgorithm = "landmass-growth" | "landmass-growth-v3";
 
 export interface WorldConfig {
   seed: number;

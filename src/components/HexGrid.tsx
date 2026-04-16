@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect, useMemo } from "react";
+import { useRef, useCallback, useEffect, useMemo } from "react";
 import type { World, Terrain } from "../types/world";
 import {
   hexToPixel,
@@ -7,6 +7,7 @@ import {
   hexBounds,
   hexCornerToPixel,
   hexKey,
+  pixelToHex,
 } from "../game/hexMath";
 
 const TERRAIN_COLORS: Record<Terrain, string> = {
@@ -34,28 +35,26 @@ interface Props {
 }
 
 export function HexGrid({ world }: Props) {
-  const svgRef = useRef<SVGSVGElement>(null);
-  const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const transformRef = useRef({ x: 0, y: 0, scale: 1 });
+  const hoveredHexKeyRef = useRef<string | null>(null);
   const dragStart = useRef<{
     mx: number;
     my: number;
     tx: number;
     ty: number;
   } | null>(null);
-  const [hoveredHexKey, setHoveredHexKey] = useState<string | null>(null);
+  const rafRef = useRef<number | null>(null);
 
-  const corners = hexCorners(HEX_SIZE);
-  const allCoords = Object.values(world.hexes).map(
-    (h) => [h.q, h.r] as [number, number],
+  const corners = useMemo(() => hexCorners(HEX_SIZE), []);
+
+  const allCoords = useMemo(
+    () => Object.values(world.hexes).map((h) => [h.q, h.r] as [number, number]),
+    [world.hexes],
   );
-  const bounds = hexBounds(allCoords, HEX_SIZE);
+  const bounds = useMemo(() => hexBounds(allCoords, HEX_SIZE), [allCoords]);
 
-  // Center the map on mount / world change
-  useEffect(() => {
-    setTransform({ x: 0, y: 0, scale: 1 });
-  }, [world]);
-
-  // Build lookup: hexKey → indices of rivers whose corners touch that hex
+  // Build lookup: hexKey → river indices
   const riversByHexKey = useMemo(() => {
     const map = new Map<string, number[]>();
     world.rivers.forEach((river, ri) => {
@@ -70,141 +69,199 @@ export function HexGrid({ world }: Props) {
     return map;
   }, [world.rivers]);
 
-  const highlightedRiverIndices = useMemo((): Set<number> => {
-    if (!hoveredHexKey) return new Set();
-    return new Set(riversByHexKey.get(hoveredHexKey) ?? []);
-  }, [hoveredHexKey, riversByHexKey]);
-
-  const onMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      dragStart.current = {
-        mx: e.clientX,
-        my: e.clientY,
-        tx: transform.x,
-        ty: transform.y,
-      };
-      setHoveredHexKey(null);
-    },
-    [transform],
+  // Pre-compute river point arrays
+  const riverPoints = useMemo(
+    () =>
+      world.rivers.map((river) => {
+        if (river.corners.length < 2) return null;
+        return river.corners.map((ck) => {
+          const [h1, h2, h3] = ck.split("|");
+          return hexCornerToPixel(h1, h2, h3);
+        });
+      }),
+    [world.rivers],
   );
 
-  const onMouseMove = useCallback((e: React.MouseEvent) => {
-    const start = dragStart.current;
-    if (!start) return;
-    setTransform((t) => ({
-      ...t,
-      x: start.tx + (e.clientX - start.mx),
-      y: start.ty + (e.clientY - start.my),
-    }));
+  // Main draw — reads transform and hoveredHexKey from refs, no React state deps
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const { x, y, scale } = transformRef.current;
+    const hoveredHexKey = hoveredHexKeyRef.current;
+    const highlightedRiverIndices = new Set<number>(
+      riversByHexKey.get(hoveredHexKey ?? "") ?? [],
+    );
+
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.width / dpr;
+    const h = canvas.height / dpr;
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(scale, scale);
+    ctx.translate(-bounds.minX, -bounds.minY);
+
+    // Draw hex fills + borders
+    for (const hex of Object.values(world.hexes)) {
+      const { x: hx, y: hy } = hexToPixel(hex.q, hex.r, HEX_SIZE);
+      ctx.beginPath();
+      ctx.moveTo(hx + corners[0].x, hy + corners[0].y);
+      for (let i = 1; i < 6; i++) {
+        ctx.lineTo(hx + corners[i].x, hy + corners[i].y);
+      }
+      ctx.closePath();
+      ctx.fillStyle = TERRAIN_COLORS[hex.terrain];
+      ctx.fill();
+      ctx.strokeStyle = "#00000033";
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+    }
+
+    // Draw rivers (normal)
+    ctx.strokeStyle = "#7ec8e3";
+    ctx.lineWidth = 1.5;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (let ri = 0; ri < world.rivers.length; ri++) {
+      if (highlightedRiverIndices.has(ri)) continue;
+      const pts = riverPoints[ri];
+      if (!pts) continue;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.stroke();
+    }
+
+    // Draw highlighted rivers on top
+    let colorIdx = 0;
+    for (const ri of highlightedRiverIndices) {
+      const pts = riverPoints[ri];
+      if (!pts) continue;
+      ctx.strokeStyle =
+        RIVER_HIGHLIGHT_COLORS[colorIdx % RIVER_HIGHLIGHT_COLORS.length];
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.stroke();
+      colorIdx++;
+    }
+
+    ctx.restore();
+  }, [world, bounds, corners, riverPoints, riversByHexKey]);
+
+  const scheduleDraw = useCallback(() => {
+    if (rafRef.current !== null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      draw();
+    });
+  }, [draw]);
+
+  // Resize observer — keep canvas pixel size in sync with its CSS size
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+        draw();
+      }
+    });
+    ro.observe(canvas);
+    return () => ro.disconnect();
+  }, [draw]);
+
+  // Redraw whenever draw changes (world/bounds/etc. changed)
+  useEffect(() => {
+    draw();
+  }, [draw]);
+
+  // Reset view on world change
+  useEffect(() => {
+    transformRef.current = { x: 0, y: 0, scale: 1 };
+  }, [world]);
+
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    const { x, y } = transformRef.current;
+    dragStart.current = { mx: e.clientX, my: e.clientY, tx: x, ty: y };
+    hoveredHexKeyRef.current = null;
   }, []);
+
+  const onMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      const start = dragStart.current;
+      if (start) {
+        transformRef.current = {
+          ...transformRef.current,
+          x: start.tx + (e.clientX - start.mx),
+          y: start.ty + (e.clientY - start.my),
+        };
+        scheduleDraw();
+        return;
+      }
+
+      // Hit-test: invert canvas transform to get world-space coords
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const { x, y, scale } = transformRef.current;
+      const cx = (e.clientX - rect.left - x) / scale + bounds.minX;
+      const cy = (e.clientY - rect.top - y) / scale + bounds.minY;
+      const { q, r } = pixelToHex(cx, cy, HEX_SIZE);
+      const hk = hexKey(q, r);
+      const next = world.hexes[hk] ? hk : null;
+      if (next !== hoveredHexKeyRef.current) {
+        hoveredHexKeyRef.current = next;
+        scheduleDraw();
+      }
+    },
+    [bounds, world.hexes, scheduleDraw],
+  );
 
   const onMouseUp = useCallback(() => {
     dragStart.current = null;
   }, []);
 
-  const onWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    const factor = e.deltaY < 0 ? 1.1 : 0.9;
-    setTransform((t) => ({
-      ...t,
-      scale: Math.min(8, Math.max(0.2, t.scale * factor)),
-    }));
-  }, []);
+  const onMouseLeave = useCallback(() => {
+    dragStart.current = null;
+    hoveredHexKeyRef.current = null;
+    scheduleDraw();
+  }, [scheduleDraw]);
 
-  function cornersToPoints(cx: number, cy: number): string {
-    return corners.map((c) => `${cx + c.x},${cy + c.y}`).join(" ");
-  }
-
-  const hexList = Object.values(world.hexes);
+  const onWheel = useCallback(
+    (e: React.WheelEvent) => {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.1 : 0.9;
+      transformRef.current = {
+        ...transformRef.current,
+        scale: Math.min(8, Math.max(0.2, transformRef.current.scale * factor)),
+      };
+      scheduleDraw();
+    },
+    [scheduleDraw],
+  );
 
   return (
-    <svg
-      ref={svgRef}
+    <canvas
+      ref={canvasRef}
       className="hex-grid"
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}
-      onMouseLeave={onMouseUp}
+      onMouseLeave={onMouseLeave}
       onWheel={onWheel}
       style={{ cursor: dragStart.current ? "grabbing" : "grab" }}
-    >
-      <g
-        transform={`translate(${transform.x}, ${transform.y}) scale(${transform.scale})`}
-      >
-        <g transform={`translate(${-bounds.minX}, ${-bounds.minY})`}>
-          {/* Render hex fills */}
-          {hexList.map((hex) => {
-            const { x, y } = hexToPixel(hex.q, hex.r, HEX_SIZE);
-            const pts = cornersToPoints(x, y);
-            const k = hexKey(hex.q, hex.r);
-            return (
-              <polygon
-                key={k}
-                points={pts}
-                fill={TERRAIN_COLORS[hex.terrain]}
-                stroke="#00000033"
-                strokeWidth={0.5}
-                onMouseEnter={() => {
-                  if (!dragStart.current) setHoveredHexKey(k);
-                }}
-                onMouseLeave={() => setHoveredHexKey(null)}
-              />
-            );
-          })}
-
-          {/* Render rivers (normal) */}
-          {world.rivers.map((river) => {
-            if (river.corners.length < 2) return null;
-            const pts = river.corners
-              .map((ck) => {
-                const [h1, h2, h3] = ck.split("|");
-                const { x, y } = hexCornerToPixel(h1, h2, h3);
-                return `${x},${y}`;
-              })
-              .join(" ");
-            return (
-              <polyline
-                key={river.id}
-                points={pts}
-                fill="none"
-                stroke="#7ec8e3"
-                strokeWidth={1.5}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            );
-          })}
-
-          {/* Render highlighted rivers on top */}
-          {highlightedRiverIndices.size > 0 &&
-            [...highlightedRiverIndices].map((ri, colorIdx) => {
-              const river = world.rivers[ri];
-              if (river.corners.length < 2) return null;
-              const color =
-                RIVER_HIGHLIGHT_COLORS[
-                  colorIdx % RIVER_HIGHLIGHT_COLORS.length
-                ];
-              const pts = river.corners
-                .map((ck) => {
-                  const [h1, h2, h3] = ck.split("|");
-                  const { x, y } = hexCornerToPixel(h1, h2, h3);
-                  return `${x},${y}`;
-                })
-                .join(" ");
-              return (
-                <polyline
-                  key={`highlight-${river.id}`}
-                  points={pts}
-                  fill="none"
-                  stroke={color}
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              );
-            })}
-        </g>
-      </g>
-    </svg>
+    />
   );
 }
