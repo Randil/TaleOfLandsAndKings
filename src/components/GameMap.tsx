@@ -1,8 +1,8 @@
-import { useWorldStore } from '../store/worldStore';
-import { HexGrid } from './HexGrid';
+import { useWorldStore } from "../store/worldStore";
+import { HexGrid } from "./HexGrid";
 
 export function GameMap() {
-  const world = useWorldStore(s => s.world);
+  const world = useWorldStore((s) => s.world);
 
   if (!world) {
     return (

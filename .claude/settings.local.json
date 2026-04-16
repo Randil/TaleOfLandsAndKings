@@ -1,9 +1,5 @@
 {
   "permissions": {
-    "allow": [
-      "Bash(npm run *)",
-      "Bash(npm install *)",
-      "Bash(npx tsc *)"
-    ]
+    "allow": ["Bash(npm run *)", "Bash(npm install *)", "Bash(npx tsc *)"]
   }
 }

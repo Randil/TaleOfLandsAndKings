@@ -1,9 +1,11 @@
 # PRD: Hex Grid & Map Generation
 
 ## Overview
+
 Render a large hex grid world map divided into provinces (regions). Each region is a substantial land area — roughly 200 hexes — with its own terrain character, and will eventually hold rivers, cities, and villages. This phase focuses on world generation, rendering, and persistence (save/load). No LLM or turn logic yet.
 
 ## Goals
+
 - Display a large hex grid map with province-scale regions (~200 hexes each)
 - Define the core TypeScript types for the world map
 - Parameterize world generation (seed + number of regions)
@@ -11,6 +13,7 @@ Render a large hex grid world map divided into provinces (regions). Each region 
 - Enable full serialization/deserialization of world state to/from JSON files
 
 ## Out of Scope (Phase 1)
+
 - LLM integration
 - Turn resolution or game logic
 - Economy / military / diplomacy stats
@@ -24,48 +27,60 @@ Render a large hex grid world map divided into provinces (regions). Each region 
 ## Data Model
 
 ### Hex
+
 ```ts
 interface Hex {
-  q: number;        // axial coordinate
-  r: number;        // axial coordinate
+  q: number; // axial coordinate
+  r: number; // axial coordinate
   regionId: string;
   terrain: Terrain; // per-hex terrain for variety within a region
 }
 ```
 
 ### Terrain
+
 ```ts
-type Terrain = 'plains' | 'forest' | 'mountains' | 'hills' | 'desert' | 'coast' | 'water';
+type Terrain =
+  | "plains"
+  | "forest"
+  | "mountains"
+  | "hills"
+  | "desert"
+  | "coast"
+  | "water";
 ```
 
 ### Region
+
 ```ts
 interface Region {
   id: string;
   name: string;
-  dominantTerrain: Terrain;   // character of the province
-  ownerId: string | null;     // kingdom id, null = unclaimed
-  hexIds: string[];           // references to Hex by `${q},${r}`
+  dominantTerrain: Terrain; // character of the province
+  ownerId: string | null; // kingdom id, null = unclaimed
+  hexIds: string[]; // references to Hex by `${q},${r}`
   // Reserved for future phases:
-  rivers: never[];            // placeholder
-  cities: never[];            // placeholder
-  villages: never[];          // placeholder
+  rivers: never[]; // placeholder
+  cities: never[]; // placeholder
+  villages: never[]; // placeholder
 }
 ```
 
 ### WorldConfig
+
 ```ts
 interface WorldConfig {
   seed: number;
-  numRegions: number;   // controls map size — total hexes ≈ numRegions * 200
+  numRegions: number; // controls map size — total hexes ≈ numRegions * 200
 }
 ```
 
 ### World
+
 ```ts
 interface World {
-  config: WorldConfig;          // generation params — needed for reproducibility
-  hexes: Record<string, Hex>;   // keyed by `${q},${r}`
+  config: WorldConfig; // generation params — needed for reproducibility
+  hexes: Record<string, Hex>; // keyed by `${q},${r}`
   regions: Record<string, Region>;
 }
 ```
@@ -80,10 +95,11 @@ Generation is a pure function — no side effects, fully deterministic given the
 
 ```ts
 // src/game/mapGen.ts
-function generateWorld(config: WorldConfig): World
+function generateWorld(config: WorldConfig): World;
 ```
 
 ### Generation Steps
+
 1. **Grid sizing** — compute grid radius so total hexes ≈ `numRegions * 200`. For N regions, radius ≈ `ceil(sqrt(N * 200 / π))`.
 2. **Region seeds** — pick N evenly distributed seed hexes using the seeded RNG (avoid clustering).
 3. **Voronoi partition** — assign every hex to its nearest seed hex (axial distance). Produces N contiguous regions.
@@ -93,6 +109,7 @@ function generateWorld(config: WorldConfig): World
 7. **Return** full `World` object.
 
 ### Constraints
+
 - Minimum region size: 100 hexes (re-roll seed placement if violated)
 - Target region size: ~200 hexes
 - Water hexes cannot be owned
@@ -104,6 +121,7 @@ function generateWorld(config: WorldConfig): World
 ## Rendering
 
 ### Component Tree
+
 ```
 <App>
   <WorldGenPanel />    // sidebar: seed input, numRegions, generate/save/load buttons
@@ -114,6 +132,7 @@ function generateWorld(config: WorldConfig): World
 ```
 
 ### HexGrid
+
 - SVG-based, one `<polygon>` per hex
 - Flat-top hex orientation
 - Hex pixel size: `HEX_SIZE = 12` (small — map is large, needs to fit viewport)
@@ -121,19 +140,21 @@ function generateWorld(config: WorldConfig): World
 - Region borders: thicker stroke (`strokeWidth=2`, contrasting color) on hex edges shared between different regions
 
 ### HexCell (inline in HexGrid or extracted)
+
 - Fill: terrain color
 - Stroke: thin for intra-region edges, thick for region borders
 
 ### Color Palette (terrain)
-| Terrain     | Fill color  |
-|-------------|-------------|
-| plains      | `#c8d98a`   |
-| forest      | `#4a7c59`   |
-| mountains   | `#7a6a5a`   |
-| hills       | `#a89070`   |
-| desert      | `#e3c98a`   |
-| coast       | `#a8c8e0`   |
-| water       | `#3a6ea8`   |
+
+| Terrain   | Fill color |
+| --------- | ---------- |
+| plains    | `#c8d98a`  |
+| forest    | `#4a7c59`  |
+| mountains | `#7a6a5a`  |
+| hills     | `#a89070`  |
+| desert    | `#e3c98a`  |
+| coast     | `#a8c8e0`  |
+| water     | `#3a6ea8`  |
 
 ---
 
@@ -141,15 +162,16 @@ function generateWorld(config: WorldConfig): World
 
 A sidebar or top bar with the following controls:
 
-| Control            | Type          | Notes                                      |
-|--------------------|---------------|--------------------------------------------|
-| Seed               | Number input  | Default: random on first load              |
-| Number of Regions  | Number input  | Min: 2, Max: 50, Default: 12               |
-| Generate           | Button        | Calls `generateWorld({ seed, numRegions })`, replaces current world in store |
-| Save to File       | Button        | Serializes world to JSON, triggers browser download as `world-<seed>.json` |
-| Load from File     | File input    | Reads JSON file, deserializes, loads into store |
+| Control           | Type         | Notes                                                                        |
+| ----------------- | ------------ | ---------------------------------------------------------------------------- |
+| Seed              | Number input | Default: random on first load                                                |
+| Number of Regions | Number input | Min: 2, Max: 50, Default: 12                                                 |
+| Generate          | Button       | Calls `generateWorld({ seed, numRegions })`, replaces current world in store |
+| Save to File      | Button       | Serializes world to JSON, triggers browser download as `world-<seed>.json`   |
+| Load from File    | File input   | Reads JSON file, deserializes, loads into store                              |
 
 ### Serialization
+
 - Format: plain JSON — `World` object is directly serializable (no circular refs, no functions)
 - Save: `JSON.stringify(world, null, 2)` → Blob → download link
 - Load: `JSON.parse(text)` → validate shape → load into store
@@ -174,6 +196,7 @@ interface WorldStore {
 ---
 
 ## File Structure
+
 ```
 src/
   types/
@@ -194,6 +217,7 @@ src/
 ---
 
 ## Acceptance Criteria
+
 - [ ] `generateWorld({ seed, numRegions })` returns a valid `World`
 - [ ] Same seed + numRegions always produces the same map
 - [ ] All regions have ≥ 100 hexes

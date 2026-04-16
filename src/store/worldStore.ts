@@ -1,5 +1,5 @@
-import { create } from 'zustand';
-import type { World } from '../types/world';
+import { create } from "zustand";
+import type { World } from "../types/world";
 
 interface WorldStore {
   world: World | null;

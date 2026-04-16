@@ -14,6 +14,7 @@ cleanly, and join without overlap.
 
 The previous model stored rivers as a flat list of `RiverEdge` pairs. This made
 it difficult to:
+
 - detect when two rivers share a stretch of the same edge
 - render rivers as continuous stroked paths
 - enforce no-duplicate-flow rules during generation
@@ -36,7 +37,7 @@ A corner is the unique point where exactly 3 hexes meet. It is identified by the
 type HexCornerKey = string;
 
 interface HexCorner {
-  key: HexCornerKey;          // canonical identifier
+  key: HexCornerKey; // canonical identifier
   hexes: [string, string, string]; // sorted hex keys of the 3 adjacent hexes
 }
 ```
@@ -69,7 +70,7 @@ Generation is a pure function added to `src/game/mapGen.ts` (or a dedicated
 `src/game/riverGen.ts`):
 
 ```ts
-function generateRivers(world: World, rng: RNG): River[]
+function generateRivers(world: World, rng: RNG): River[];
 ```
 
 ### Step 1 — Enumerate corners
@@ -86,6 +87,7 @@ directions, compute the canonical triplet.
 ### Step 2 — Find candidate start corners
 
 A corner is a **valid start** if:
+
 - at least one of its 3 hexes has terrain `mountains`, `hills`, or `lake`, **and**
 - it is **not** already part of an existing river (rivers always originate from
   terrain sources, never by splitting off an existing river)
@@ -148,13 +150,13 @@ controls how many rivers are attempted: `numRivers = floor(totalLandHexes / hexe
 
 ## Termination Rules (summary)
 
-| Condition | Action |
-|---|---|
-| No valid neighbors remain | Stop (dead end) |
-| Neighbor touches `lake` or `water` terrain | Add corner, stop |
-| Neighbor is already on an existing river | Add corner, stop (tributary joins river) |
-| Neighbor is already in **this** river | Skip — try another neighbor (cycle prevention) |
-| Start corner is already on a river | Skip as candidate start entirely |
+| Condition                                  | Action                                         |
+| ------------------------------------------ | ---------------------------------------------- |
+| No valid neighbors remain                  | Stop (dead end)                                |
+| Neighbor touches `lake` or `water` terrain | Add corner, stop                               |
+| Neighbor is already on an existing river   | Add corner, stop (tributary joins river)       |
+| Neighbor is already in **this** river      | Skip — try another neighbor (cycle prevention) |
+| Start corner is already on a river         | Skip as candidate start entirely               |
 
 ---
 
@@ -194,7 +196,7 @@ A corner's SVG pixel position is the **centroid of its 3 hex centers**:
 
 ```ts
 function cornerToPixel(corner: HexCorner, hexes: Record<string, Hex>): Point {
-  const pts = corner.hexes.map(k => hexToPixel(hexes[k]));
+  const pts = corner.hexes.map((k) => hexToPixel(hexes[k]));
   return {
     x: (pts[0].x + pts[1].x + pts[2].x) / 3,
     y: (pts[0].y + pts[1].y + pts[2].y) / 3,
@@ -209,12 +211,12 @@ corner sequence.
 
 ## Changes Required
 
-| File | Change |
-|---|---|
-| `src/types/world.ts` | Replace `RiverEdge` / `River` with `HexCornerKey` / updated `River` |
-| `src/game/mapGen.ts` or new `src/game/riverGen.ts` | Implement `enumerateCorners`, `generateRivers` |
-| `src/game/hexMath.ts` | Add `hexCorners(q,r)`, `adjacentCorners(key)`, `cornerToPixel` |
-| `src/components/HexGrid.tsx` | Render rivers as `<polyline>` over corner pixel coords |
+| File                                               | Change                                                              |
+| -------------------------------------------------- | ------------------------------------------------------------------- |
+| `src/types/world.ts`                               | Replace `RiverEdge` / `River` with `HexCornerKey` / updated `River` |
+| `src/game/mapGen.ts` or new `src/game/riverGen.ts` | Implement `enumerateCorners`, `generateRivers`                      |
+| `src/game/hexMath.ts`                              | Add `hexCorners(q,r)`, `adjacentCorners(key)`, `cornerToPixel`      |
+| `src/components/HexGrid.tsx`                       | Render rivers as `<polyline>` over corner pixel coords              |
 
 ---
 

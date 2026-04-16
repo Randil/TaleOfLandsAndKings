@@ -1,6 +1,6 @@
-import { WorldGenPanel } from './components/WorldGenPanel';
-import { GameMap } from './components/GameMap';
-import './App.css';
+import { WorldGenPanel } from "./components/WorldGenPanel";
+import { GameMap } from "./components/GameMap";
+import "./App.css";
 
 function App() {
   return (

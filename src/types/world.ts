@@ -1,4 +1,12 @@
-export type Terrain = 'plains' | 'forest' | 'mountains' | 'hills' | 'desert' | 'coast' | 'water' | 'lake';
+export type Terrain =
+  | "plains"
+  | "forest"
+  | "mountains"
+  | "hills"
+  | "desert"
+  | "coast"
+  | "water"
+  | "lake";
 
 export interface Hex {
   q: number;
@@ -27,7 +35,7 @@ export interface River {
   corners: HexCornerKey[]; // ordered path — each consecutive pair shares a hex edge
 }
 
-export type MapGenAlgorithm = 'landmass-growth' | 'landmass-growth-v2';
+export type MapGenAlgorithm = "landmass-growth" | "landmass-growth-v2";
 
 export interface WorldConfig {
   seed: number;

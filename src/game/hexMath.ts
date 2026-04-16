@@ -6,19 +6,32 @@ export function hexKey(q: number, r: number): string {
 }
 
 // Axial distance between two hexes
-export function hexDistance(q1: number, r1: number, q2: number, r2: number): number {
-  return (Math.abs(q1 - q2) + Math.abs(q1 + r1 - q2 - r2) + Math.abs(r1 - r2)) / 2;
+export function hexDistance(
+  q1: number,
+  r1: number,
+  q2: number,
+  r2: number,
+): number {
+  return (
+    (Math.abs(q1 - q2) + Math.abs(q1 + r1 - q2 - r2) + Math.abs(r1 - r2)) / 2
+  );
 }
 
 // Flat-top hex: axial → pixel center
-export function hexToPixel(q: number, r: number, size: number = HEX_SIZE): { x: number; y: number } {
+export function hexToPixel(
+  q: number,
+  r: number,
+  size: number = HEX_SIZE,
+): { x: number; y: number } {
   const x = size * (3 / 2) * q;
-  const y = size * (Math.sqrt(3) / 2 * q + Math.sqrt(3) * r);
+  const y = size * ((Math.sqrt(3) / 2) * q + Math.sqrt(3) * r);
   return { x, y };
 }
 
 // Flat-top hex corners (relative to center)
-export function hexCorners(size: number = HEX_SIZE): { x: number; y: number }[] {
+export function hexCorners(
+  size: number = HEX_SIZE,
+): { x: number; y: number }[] {
   return Array.from({ length: 6 }, (_, i) => {
     const angle = (Math.PI / 180) * (60 * i);
     return { x: size * Math.cos(angle), y: size * Math.sin(angle) };
@@ -27,8 +40,12 @@ export function hexCorners(size: number = HEX_SIZE): { x: number; y: number }[] 
 
 // Flat-top hex: 6 axial neighbor directions
 export const NEIGHBOR_DIRS: [number, number][] = [
-  [1, 0], [1, -1], [0, -1],
-  [-1, 0], [-1, 1], [0, 1],
+  [1, 0],
+  [1, -1],
+  [0, -1],
+  [-1, 0],
+  [-1, 1],
+  [0, 1],
 ];
 
 export function hexNeighbors(q: number, r: number): [number, number][] {
@@ -63,15 +80,21 @@ export function hexesInRect(width: number, height: number): [number, number][] {
 
 // Maps axial direction string to edge index (edge i = corners i and i+1, shared with neighbor dir i)
 const NEIGHBOR_DIR_TO_EDGE: Record<string, number> = {
-  '1,0': 0, '1,-1': 1, '0,-1': 2,
-  '-1,0': 3, '-1,1': 4, '0,1': 5,
+  "1,0": 0,
+  "1,-1": 1,
+  "0,-1": 2,
+  "-1,0": 3,
+  "-1,1": 4,
+  "0,1": 5,
 };
 
 // Returns absolute pixel coords of the shared edge between two adjacent hexes.
 // The edge is defined by two corner points of hex (q1,r1).
 export function sharedEdgePixels(
-  q1: number, r1: number,
-  q2: number, r2: number,
+  q1: number,
+  r1: number,
+  q2: number,
+  r2: number,
   size: number = HEX_SIZE,
 ): { x1: number; y1: number; x2: number; y2: number } | null {
   const edgeIdx = NEIGHBOR_DIR_TO_EDGE[`${q2 - q1},${r2 - r1}`];
@@ -86,7 +109,10 @@ export function sharedEdgePixels(
 // Returns the 6 corner triplets for hex (q, r).
 // Corner i sits between edges i and (i-1+6)%6, shared by (q,r) and its neighbors
 // in directions i and (i-1+6)%6. Each triplet is returned sorted (canonical).
-export function hexCornerTriplets(q: number, r: number): [string, string, string][] {
+export function hexCornerTriplets(
+  q: number,
+  r: number,
+): [string, string, string][] {
   return Array.from({ length: 6 }, (_, i) => {
     const [d1q, d1r] = NEIGHBOR_DIRS[i];
     const [d2q, d2r] = NEIGHBOR_DIRS[(i - 1 + 6) % 6];
@@ -103,10 +129,12 @@ export function hexCornerTriplets(q: number, r: number): [string, string, string
 // Given a corner's sorted hex-key triplet, returns the 3 adjacent corner triplets.
 // Each adjacent corner shares 2 of the 3 hexes (they are connected by the shared edge).
 export function adjacentCornerTriplets(
-  h1k: string, h2k: string, h3k: string,
+  h1k: string,
+  h2k: string,
+  h3k: string,
 ): [string, string, string][] {
   const parseHexKey = (k: string): [number, number] => {
-    const i = k.indexOf(',');
+    const i = k.indexOf(",");
     return [parseInt(k.slice(0, i), 10), parseInt(k.slice(i + 1), 10)];
   };
 
@@ -119,14 +147,21 @@ export function adjacentCornerTriplets(
   const result: [string, string, string][] = [];
   // For each pair (A, B), C is the third hex. D is the hex that shares edge A-B
   // but is not C — forming the adjacent corner {A, B, D}.
-  const pairs: [number, number, number][] = [[0, 1, 2], [0, 2, 1], [1, 2, 0]];
+  const pairs: [number, number, number][] = [
+    [0, 1, 2],
+    [0, 2, 1],
+    [1, 2, 0],
+  ];
   for (const [ai, bi, ci] of pairs) {
     const [Ak, Aq, Ar] = hs[ai];
     const [Bk, Bq, Br] = hs[bi];
     const [Ck] = hs[ci];
 
-    const dq = Bq - Aq, dr = Br - Ar;
-    const dirIdx = NEIGHBOR_DIRS.findIndex(([ddq, ddr]) => ddq === dq && ddr === dr);
+    const dq = Bq - Aq,
+      dr = Br - Ar;
+    const dirIdx = NEIGHBOR_DIRS.findIndex(
+      ([ddq, ddr]) => ddq === dq && ddr === dr,
+    );
     if (dirIdx === -1) continue;
 
     const [dp0q, dp0r] = NEIGHBOR_DIRS[(dirIdx - 1 + 6) % 6];
@@ -146,14 +181,16 @@ export function adjacentCornerTriplets(
 // Pixel position of a hex corner = centroid of its 3 adjacent hex centers.
 // Correct even when hex keys are off-grid (pixel coords are purely mathematical).
 export function hexCornerToPixel(
-  h1k: string, h2k: string, h3k: string,
+  h1k: string,
+  h2k: string,
+  h3k: string,
   size: number = HEX_SIZE,
 ): { x: number; y: number } {
   const parseHexKey = (k: string): [number, number] => {
-    const i = k.indexOf(',');
+    const i = k.indexOf(",");
     return [parseInt(k.slice(0, i), 10), parseInt(k.slice(i + 1), 10)];
   };
-  const pts = [h1k, h2k, h3k].map(k => {
+  const pts = [h1k, h2k, h3k].map((k) => {
     const [q, r] = parseHexKey(k);
     return hexToPixel(q, r, size);
   });
@@ -165,7 +202,10 @@ export function hexCornerToPixel(
 
 // Compute bounding box of all hex centers (for SVG viewBox)
 export function hexBounds(coords: [number, number][], size: number = HEX_SIZE) {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
   for (const [q, r] of coords) {
     const { x, y } = hexToPixel(q, r, size);
     if (x < minX) minX = x;

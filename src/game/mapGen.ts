@@ -1,25 +1,31 @@
-import type { World, WorldConfig, Hex, Terrain, River } from '../types/world';
-import { makeRng, rngInt, rngPick, rngShuffle } from './rng';
-import { hexKey, hexNeighbors, hexesInRect, hexCornerTriplets, adjacentCornerTriplets } from './hexMath';
+import type { World, WorldConfig, Hex, Terrain, River } from "../types/world";
+import { makeRng, rngInt, rngPick, rngShuffle } from "./rng";
+import {
+  hexKey,
+  hexNeighbors,
+  hexesInRect,
+  hexCornerTriplets,
+  adjacentCornerTriplets,
+} from "./hexMath";
 
 // Elevation ladder: each time a hex is "selected" it moves one step up
 const ELEVATION: Record<Terrain, Terrain> = {
-  water:     'plains',
-  plains:    'hills',
-  hills:     'mountains',
-  mountains: 'mountains',
-  lake:      'lake',
-  forest:    'forest',
-  desert:    'desert',
-  coast:     'coast',
+  water: "plains",
+  plains: "hills",
+  hills: "mountains",
+  mountains: "mountains",
+  lake: "lake",
+  forest: "forest",
+  desert: "desert",
+  coast: "coast",
 };
 
 export function generateWorld(config: WorldConfig): World {
   const rng = makeRng(config.seed);
   switch (config.mapGenAlgorithm) {
-    case 'landmass-growth':
+    case "landmass-growth":
       return landmassGrowthGen(config, rng, false);
-    case 'landmass-growth-v2':
+    case "landmass-growth-v2":
       return landmassGrowthGen(config, rng, true);
   }
 }
@@ -38,7 +44,7 @@ function landmassGrowthGen(
   // Fill map with water
   const terrainMap = new Map<string, Terrain>();
   for (const [q, r] of allCoords) {
-    terrainMap.set(hexKey(q, r), 'water');
+    terrainMap.set(hexKey(q, r), "water");
   }
 
   const maxLandmassSize = Math.max(1, Math.floor(totalHexes * 0.05));
@@ -46,7 +52,7 @@ function landmassGrowthGen(
 
   const isLand = (key: string): boolean => {
     const t = terrainMap.get(key);
-    return t !== undefined && t !== 'water';
+    return t !== undefined && t !== "water";
   };
 
   const landNeighborCount = (q: number, r: number): number =>
@@ -76,7 +82,7 @@ function landmassGrowthGen(
 
       const key = hexKey(q, r);
       const current = terrainMap.get(key)!;
-      if (current === 'water') landCount++;
+      if (current === "water") landCount++;
       terrainMap.set(key, ELEVATION[current]);
       added++;
 
@@ -97,22 +103,32 @@ function landmassGrowthGen(
   for (const [q, r] of allCoords) {
     const key = hexKey(q, r);
     const terrain = terrainMap.get(key)!;
-    const isWaterLike = terrain === 'water' || terrain === 'lake';
-    hexes[key] = { q, r, regionId: isWaterLike ? 'water' : 'land', terrain };
+    const isWaterLike = terrain === "water" || terrain === "lake";
+    hexes[key] = { q, r, regionId: isWaterLike ? "water" : "land", terrain };
   }
 
   const rivers = generateRivers(hexes, coordSet, allCoords, config, rng);
 
   const regions = {
     water: {
-      id: 'water', name: 'Ocean', dominantTerrain: 'water' as Terrain, ownerId: null,
-      hexIds: Object.keys(hexes).filter(k => hexes[k].regionId === 'water'),
-      rivers: [] as never[], cities: [] as never[], villages: [] as never[],
+      id: "water",
+      name: "Ocean",
+      dominantTerrain: "water" as Terrain,
+      ownerId: null,
+      hexIds: Object.keys(hexes).filter((k) => hexes[k].regionId === "water"),
+      rivers: [] as never[],
+      cities: [] as never[],
+      villages: [] as never[],
     },
     land: {
-      id: 'land', name: 'Land', dominantTerrain: 'plains' as Terrain, ownerId: null,
-      hexIds: Object.keys(hexes).filter(k => hexes[k].regionId === 'land'),
-      rivers: [] as never[], cities: [] as never[], villages: [] as never[],
+      id: "land",
+      name: "Land",
+      dominantTerrain: "plains" as Terrain,
+      ownerId: null,
+      hexIds: Object.keys(hexes).filter((k) => hexes[k].regionId === "land"),
+      rivers: [] as never[],
+      cities: [] as never[],
+      villages: [] as never[],
     },
   };
 
@@ -132,8 +148,10 @@ function detectLakes(
 
   for (const [q, r] of allCoords) {
     const key = hexKey(q, r);
-    if (terrainMap.get(key) !== 'water') continue;
-    const onBoundary = hexNeighbors(q, r).some(([nq, nr]) => !coordSet.has(hexKey(nq, nr)));
+    if (terrainMap.get(key) !== "water") continue;
+    const onBoundary = hexNeighbors(q, r).some(
+      ([nq, nr]) => !coordSet.has(hexKey(nq, nr)),
+    );
     if (onBoundary) {
       oceanKeys.add(key);
       oceanQueue.push([q, r]);
@@ -145,7 +163,11 @@ function detectLakes(
     const [q, r] = oceanQueue[qi++];
     for (const [nq, nr] of hexNeighbors(q, r)) {
       const nKey = hexKey(nq, nr);
-      if (coordSet.has(nKey) && !oceanKeys.has(nKey) && terrainMap.get(nKey) === 'water') {
+      if (
+        coordSet.has(nKey) &&
+        !oceanKeys.has(nKey) &&
+        terrainMap.get(nKey) === "water"
+      ) {
         oceanKeys.add(nKey);
         oceanQueue.push([nq, nr]);
       }
@@ -155,8 +177,8 @@ function detectLakes(
   // Any water hex not reachable from the boundary = inland → lake
   for (const [q, r] of allCoords) {
     const key = hexKey(q, r);
-    if (terrainMap.get(key) === 'water' && !oceanKeys.has(key)) {
-      terrainMap.set(key, 'lake');
+    if (terrainMap.get(key) === "water" && !oceanKeys.has(key)) {
+      terrainMap.set(key, "lake");
     }
   }
 }
@@ -176,14 +198,15 @@ function generateRivers(
   const cornerMap = new Map<string, [string, string, string]>();
   for (const [q, r] of allCoords) {
     for (const triplet of hexCornerTriplets(q, r)) {
-      const key = triplet.join('|');
+      const key = triplet.join("|");
       if (!cornerMap.has(key)) cornerMap.set(key, triplet);
     }
   }
 
-  const getTerrain = (k: string): Terrain => hexes[k]?.terrain ?? 'water';
-  const isSource   = (t: Terrain) => t === 'mountains' || t === 'hills' || t === 'lake';
-  const isTerminal = (t: Terrain) => t === 'water' || t === 'lake';
+  const getTerrain = (k: string): Terrain => hexes[k]?.terrain ?? "water";
+  const isSource = (t: Terrain) =>
+    t === "mountains" || t === "hills" || t === "lake";
+  const isTerminal = (t: Terrain) => t === "water" || t === "lake";
 
   // Find connected landmasses (for minLandmassForRiver gate)
   const globalVisited = new Set<string>();
@@ -193,7 +216,7 @@ function generateRivers(
     const key = hexKey(q, r);
     if (globalVisited.has(key)) continue;
     const terrain = hexes[key].terrain;
-    if (terrain === 'water' || terrain === 'lake') continue;
+    if (terrain === "water" || terrain === "lake") continue;
 
     const mass: [number, number][] = [];
     const queue: [number, number][] = [[q, r]];
@@ -206,7 +229,7 @@ function generateRivers(
         const nKey = hexKey(nq, nr);
         if (globalVisited.has(nKey) || !coordSet.has(nKey)) continue;
         const nt = hexes[nKey].terrain;
-        if (nt !== 'water' && nt !== 'lake') {
+        if (nt !== "water" && nt !== "lake") {
           globalVisited.add(nKey);
           queue.push([nq, nr]);
         }
@@ -231,8 +254,8 @@ function generateRivers(
 
     for (const [ck, hexKeys] of cornerMap) {
       if (allRiverCorners.has(ck)) continue;
-      if (!hexKeys.some(k => massKeySet.has(k))) continue;
-      if (!hexKeys.some(k => isSource(getTerrain(k)))) continue;
+      if (!hexKeys.some((k) => massKeySet.has(k))) continue;
+      if (!hexKeys.some((k) => isSource(getTerrain(k)))) continue;
       candidates.push(ck);
     }
 
@@ -244,7 +267,14 @@ function generateRivers(
       const startKey = shuffled[startIdx++];
       if (allRiverCorners.has(startKey)) continue;
 
-      const corners = traceRiverCorners(startKey, cornerMap, allRiverCorners, getTerrain, isTerminal, rng);
+      const corners = traceRiverCorners(
+        startKey,
+        cornerMap,
+        allRiverCorners,
+        getTerrain,
+        isTerminal,
+        rng,
+      );
 
       if (corners.length >= 3) {
         for (const ck of corners) allRiverCorners.add(ck);
@@ -273,22 +303,31 @@ function traceRiverCorners(
     const currentHexes = cornerMap.get(currentKey);
     if (!currentHexes) break;
 
-    const adjTriplets = adjacentCornerTriplets(currentHexes[0], currentHexes[1], currentHexes[2]);
-    const adjacent = adjTriplets.map(trip => ({ key: trip.join('|'), hexKeys: trip }));
+    const adjTriplets = adjacentCornerTriplets(
+      currentHexes[0],
+      currentHexes[1],
+      currentHexes[2],
+    );
+    const adjacent = adjTriplets.map((trip) => ({
+      key: trip.join("|"),
+      hexKeys: trip,
+    }));
 
     // Exclude corners already in this river (no cycles)
-    const nonCyclic = adjacent.filter(a => !visited.has(a.key));
+    const nonCyclic = adjacent.filter((a) => !visited.has(a.key));
     if (nonCyclic.length === 0) break;
 
     // Terminate: any neighbor touches water or lake
-    const terminals = nonCyclic.filter(a => a.hexKeys.some(k => isTerminal(getTerrain(k))));
+    const terminals = nonCyclic.filter((a) =>
+      a.hexKeys.some((k) => isTerminal(getTerrain(k))),
+    );
     if (terminals.length > 0) {
       corners.push(rngPick(rng, terminals).key);
       break;
     }
 
     // Terminate: any neighbor is already on another river (tributary junction)
-    const junctions = nonCyclic.filter(a => allRiverCorners.has(a.key));
+    const junctions = nonCyclic.filter((a) => allRiverCorners.has(a.key));
     if (junctions.length > 0) {
       corners.push(rngPick(rng, junctions).key);
       break;
