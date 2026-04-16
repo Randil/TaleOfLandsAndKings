@@ -1,4 +1,4 @@
-export type Terrain = 'plains' | 'forest' | 'mountains' | 'hills' | 'desert' | 'coast' | 'water';
+export type Terrain = 'plains' | 'forest' | 'mountains' | 'hills' | 'desert' | 'coast' | 'water' | 'lake';
 
 export interface Hex {
   q: number;
@@ -19,13 +19,29 @@ export interface Region {
   villages: never[];
 }
 
+// Canonical key for a hex corner: '|'-joined sorted triplet of the 3 adjacent hex keys
+export type HexCornerKey = string;
+
+export interface River {
+  id: string;
+  corners: HexCornerKey[]; // ordered path — each consecutive pair shares a hex edge
+}
+
+export type MapGenAlgorithm = 'landmass-growth' | 'landmass-growth-v2';
+
 export interface WorldConfig {
   seed: number;
-  numRegions: number;
+  width: number;
+  height: number;
+  mapGenAlgorithm: MapGenAlgorithm;
+  minLandFraction: number;
+  minLandmassForRiver: number;
+  hexesPerRiver: number;
 }
 
 export interface World {
   config: WorldConfig;
   hexes: Record<string, Hex>;
   regions: Record<string, Region>;
+  rivers: River[];
 }

@@ -33,6 +33,9 @@ No direct unit control — the player governs, the LLM simulates.
 4. Turn resolution — dice logic, outcome ranges, applying state deltas
 5. Economy / military / diplomacy stats per kingdom
 
+## Workflow
+- Always ask for approval before making any code changes. Describe what you plan to change and wait for explicit confirmation before editing any files.
+
 ## Coding Conventions
 - Functional components only, no class components
 - Game logic must be pure functions — no side effects outside narrator/
