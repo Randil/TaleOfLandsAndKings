@@ -21,7 +21,7 @@ const TERRAIN_HEIGHT: Record<Terrain, number> = {
 };
 
 // Score a corner by summing terrain heights of its influence zone:
-// the 3 adjacent hexes plus all their neighbors (up to 12 unique hexes).
+// the 3 adjacent hexes, their neighbors (ring 1), and ring 1's neighbors (ring 2).
 // Off-grid hexes contribute 0 (treated as water).
 function cornerScore(
   cornerKey: string,
@@ -32,7 +32,18 @@ function cornerScore(
   if (!triplet) return 0;
 
   const zone = new Set<string>(triplet);
+  const ring1 = new Set<string>();
   for (const hk of triplet) {
+    const sep = hk.indexOf(",");
+    const q = parseInt(hk.slice(0, sep), 10);
+    const r = parseInt(hk.slice(sep + 1), 10);
+    for (const [nq, nr] of hexNeighbors(q, r)) {
+      const nk = hexKey(nq, nr);
+      zone.add(nk);
+      ring1.add(nk);
+    }
+  }
+  for (const hk of ring1) {
     const sep = hk.indexOf(",");
     const q = parseInt(hk.slice(0, sep), 10);
     const r = parseInt(hk.slice(sep + 1), 10);
@@ -210,26 +221,26 @@ function landmassGrowthV3(
   let landCount = 0;
 
   // ── Phase 1: Continental Cores ───────────────────────────────────────────
-  // 3–5 large landmasses, each 2–5% of target land hexes.
-  const continentCount = rngInt(rng, 3, 5);
-  for (let i = 0; i < continentCount; i++) {
+  // Spawn large landmasses (3–10% of target land hexes each) until 50% of
+  // target land coverage is reached.
+  while (landCount < targetLandHexes * 0.5) {
     const size = rngInt(
       rng,
-      Math.max(1, Math.floor(targetLandHexes * 0.02)),
-      Math.max(1, Math.floor(targetLandHexes * 0.05)),
+      Math.max(1, Math.floor(targetLandHexes * 0.03)),
+      Math.max(1, Math.floor(targetLandHexes * 0.10)),
     );
     const [startQ, startR] = allCoords[Math.floor(rng() * totalHexes)];
     landCount += growLandmass(startQ, startR, size, terrainMap, coordSet, rng);
   }
 
   // ── Phase 2: Coastal Clusters ────────────────────────────────────────────
-  // 5–20 medium landmasses near existing continents, 20 hexes up to 1% of
-  // total map hexes. Seed hex is chosen within a proximity radius of a random
-  // Phase 1 land hex; falls back to fully random placement if needed.
-  const clusterCount = rngInt(rng, 5, 20);
+  // Spawn medium landmasses (20 hexes up to 2% of target land hexes each)
+  // near existing continents until 85% of target land coverage is reached.
+  // Seed hex is chosen within a proximity radius of a random Phase 1 land hex;
+  // falls back to fully random placement if needed.
   const proximityRadius = Math.max(
-    5,
-    Math.floor(Math.sqrt(totalHexes) * 0.15),
+    3,
+    Math.floor(Math.sqrt(totalHexes) * 0.07),
   );
 
   // Snapshot land hexes after Phase 1 for proximity anchoring.
@@ -240,9 +251,9 @@ function landmassGrowthV3(
     }
   }
 
-  for (let i = 0; i < clusterCount; i++) {
+  while (landCount < targetLandHexes * 0.85) {
     const minSize = 20;
-    const maxSize = Math.max(minSize, Math.floor(totalHexes * 0.01));
+    const maxSize = Math.max(minSize, Math.floor(targetLandHexes * 0.02));
     const size = rngInt(rng, minSize, maxSize);
 
     let startQ: number;
@@ -279,12 +290,50 @@ function landmassGrowthV3(
   }
 
   // ── Phase 3: Scatter Islands ─────────────────────────────────────────────
-  // 1–20 hex islands placed at random until target land coverage is met.
-  while (landCount / totalHexes < minLandFraction) {
-    const [startQ, startR] = allCoords[Math.floor(rng() * totalHexes)];
-    const size = rngInt(rng, 1, 20);
-    landCount += growLandmass(startQ, startR, size, terrainMap, coordSet, rng);
+  // Islands are placed in clusters of 1–7, each island 1–20 hexes. The first
+  // island in a cluster picks a random map position; each subsequent island
+  // spawns within a small proximity radius of the previous island's seed.
+  // Islands may merge naturally if they grow into each other.
+  const islandClusterRadius = Math.max(3, Math.floor(Math.sqrt(totalHexes) * 0.05));
+
+  while (landCount < targetLandHexes) {
+    const clusterSize = rngInt(rng, 1, 7);
+    let [prevQ, prevR] = allCoords[Math.floor(rng() * totalHexes)];
+
+    for (let c = 0; c < clusterSize && landCount < targetLandHexes; c++) {
+      let startQ: number;
+      let startR: number;
+
+      if (c === 0) {
+        startQ = prevQ;
+        startR = prevR;
+      } else {
+        let found = false;
+        for (let attempt = 0; attempt < 10; attempt++) {
+          const dq = Math.floor((rng() * 2 - 1) * islandClusterRadius);
+          const dr = Math.floor((rng() * 2 - 1) * islandClusterRadius);
+          const cq = prevQ + dq;
+          const cr = prevR + dr;
+          if (coordSet.has(hexKey(cq, cr))) {
+            startQ = cq;
+            startR = cr;
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          [startQ, startR] = allCoords[Math.floor(rng() * totalHexes)];
+        }
+      }
+
+      const size = rngInt(rng, 1, 20);
+      landCount += growLandmass(startQ!, startR!, size, terrainMap, coordSet, rng);
+      prevQ = startQ!;
+      prevR = startR!;
+    }
   }
+
+  regulateMountains(terrainMap, allCoords, coordSet, rng, config.mountainDensity);
 
   detectLakes(terrainMap, allCoords, coordSet);
 
@@ -323,6 +372,142 @@ function landmassGrowthV3(
   };
 
   return { config, hexes, regions, rivers };
+}
+
+// BFS outward from (startQ, startR) to find the nearest on-grid hex whose
+// terrain passes isValid. Returns null if no such hex exists.
+function findNearestHex(
+  startQ: number,
+  startR: number,
+  coordSet: Set<string>,
+  terrainMap: Map<string, Terrain>,
+  isValid: (t: Terrain) => boolean,
+): [number, number] | null {
+  const visited = new Set<string>([hexKey(startQ, startR)]);
+  const queue: [number, number][] = [[startQ, startR]];
+  let qi = 0;
+  while (qi < queue.length) {
+    const [q, r] = queue[qi++];
+    for (const [nq, nr] of hexNeighbors(q, r)) {
+      const nKey = hexKey(nq, nr);
+      if (!coordSet.has(nKey) || visited.has(nKey)) continue;
+      visited.add(nKey);
+      if (isValid(terrainMap.get(nKey)!)) return [nq, nr];
+      queue.push([nq, nr]);
+    }
+  }
+  return null;
+}
+
+// ─── Mountain Density Regulation ─────────────────────────────────────────────
+
+// Determine direction once from the initial ratio, then run only that direction
+// until the target is met — no cycling between flatten and raise.
+//
+// Flatten (too many mountains): pick a random mountain hex, walk to adjacent
+//   mountains/hills lowering each by one step, 3–30 hexes per cycle. When no
+//   adjacent valid hex exists, BFS to the nearest one rather than ending early.
+// Raise (too few mountains): pick a random plains hex, walk to adjacent
+//   plains/hills raising each by one step, 3–30 hexes per cycle. Same fallback.
+function regulateMountains(
+  terrainMap: Map<string, Terrain>,
+  allCoords: [number, number][],
+  coordSet: Set<string>,
+  rng: () => number,
+  mountainDensity: number,
+): void {
+  let landCount = 0;
+  let mountainCount = 0;
+  for (const [q, r] of allCoords) {
+    const t = terrainMap.get(hexKey(q, r))!;
+    if (t !== "water" && t !== "lake") landCount++;
+    if (t === "mountains") mountainCount++;
+  }
+  if (landCount === 0) return;
+
+  const initialRatio = mountainCount / landCount;
+
+  if (initialRatio > mountainDensity) {
+    // ── Flatten: run until mountain% ≤ target ──────────────────────────────
+    const isFlattenable = (t: Terrain) => t === "mountains" || t === "hills";
+
+    while (mountainCount / landCount > mountainDensity) {
+      const mountainHexes: [number, number][] = [];
+      for (const [q, r] of allCoords) {
+        if (terrainMap.get(hexKey(q, r)) === "mountains") mountainHexes.push([q, r]);
+      }
+      if (mountainHexes.length === 0) break;
+
+      let [curQ, curR] = mountainHexes[Math.floor(rng() * mountainHexes.length)];
+      const cycleLength = rngInt(rng, 3, 30);
+
+      for (let i = 0; i < cycleLength; i++) {
+        const key = hexKey(curQ, curR);
+        const t = terrainMap.get(key)!;
+        if (t === "mountains") {
+          terrainMap.set(key, "hills");
+          mountainCount--;
+        } else if (t === "hills") {
+          terrainMap.set(key, "plains");
+        }
+
+        const candidates: [number, number][] = [];
+        for (const [nq, nr] of hexNeighbors(curQ, curR)) {
+          const nKey = hexKey(nq, nr);
+          if (coordSet.has(nKey) && isFlattenable(terrainMap.get(nKey)!)) {
+            candidates.push([nq, nr]);
+          }
+        }
+        if (candidates.length > 0) {
+          [curQ, curR] = candidates[Math.floor(rng() * candidates.length)];
+        } else {
+          const nearest = findNearestHex(curQ, curR, coordSet, terrainMap, isFlattenable);
+          if (nearest === null) break;
+          [curQ, curR] = nearest;
+        }
+      }
+    }
+  } else if (initialRatio < mountainDensity) {
+    // ── Raise: run until mountain% ≥ target ───────────────────────────────
+    const isRaiseable = (t: Terrain) => t === "plains" || t === "hills";
+
+    while (mountainCount / landCount < mountainDensity) {
+      const plainsHexes: [number, number][] = [];
+      for (const [q, r] of allCoords) {
+        if (terrainMap.get(hexKey(q, r)) === "plains") plainsHexes.push([q, r]);
+      }
+      if (plainsHexes.length === 0) break;
+
+      let [curQ, curR] = plainsHexes[Math.floor(rng() * plainsHexes.length)];
+      const cycleLength = rngInt(rng, 3, 30);
+
+      for (let i = 0; i < cycleLength; i++) {
+        const key = hexKey(curQ, curR);
+        const t = terrainMap.get(key)!;
+        if (t === "plains") {
+          terrainMap.set(key, "hills");
+        } else if (t === "hills") {
+          terrainMap.set(key, "mountains");
+          mountainCount++;
+        }
+
+        const candidates: [number, number][] = [];
+        for (const [nq, nr] of hexNeighbors(curQ, curR)) {
+          const nKey = hexKey(nq, nr);
+          if (coordSet.has(nKey) && isRaiseable(terrainMap.get(nKey)!)) {
+            candidates.push([nq, nr]);
+          }
+        }
+        if (candidates.length > 0) {
+          [curQ, curR] = candidates[Math.floor(rng() * candidates.length)];
+        } else {
+          const nearest = findNearestHex(curQ, curR, coordSet, terrainMap, isRaiseable);
+          if (nearest === null) break;
+          [curQ, curR] = nearest;
+        }
+      }
+    }
+  }
 }
 
 // ─── Lake Detection ──────────────────────────────────────────────────────────
@@ -529,6 +714,36 @@ function generateRivers(
     }
   }
 
+  // ── Post-process: classify large rivers ──────────────────────────────────
+  // Build an index: cornerKey → indices of rivers whose last corner is that key.
+  const terminalCorners = new Map<string, number[]>();
+  for (let ri = 0; ri < rivers.length; ri++) {
+    const lastCorner = rivers[ri].corners[rivers[ri].corners.length - 1];
+    if (!terminalCorners.has(lastCorner)) terminalCorners.set(lastCorner, []);
+    terminalCorners.get(lastCorner)!.push(ri);
+  }
+
+  for (let ri = 0; ri < rivers.length; ri++) {
+    const river = rivers[ri];
+
+    // Rule 1: lake source — first corner touches a lake hex
+    const firstHexes = cornerMap.get(river.corners[0]);
+    if (firstHexes?.some((k) => getTerrain(k) === "lake")) {
+      river.largeFromIndex = 0;
+      continue;
+    }
+
+    // Rule 2: tributary junction — first corner in this river that is the
+    // terminal corner of any other river
+    for (let ci = 0; ci < river.corners.length; ci++) {
+      const tributaries = terminalCorners.get(river.corners[ci]);
+      if (tributaries && tributaries.some((tri) => tri !== ri)) {
+        river.largeFromIndex = ci;
+        break;
+      }
+    }
+  }
+
   return rivers;
 }
 
@@ -672,8 +887,21 @@ function traceRiverCorners(
       break;
     }
 
+    // Exclude steps where either shared hex (the edge being crossed) is water or lake.
+    // This prevents rivers from running through lake/water interiors or along their shores.
+    const currentHexSet = new Set(currentHexes);
+    const nonInterior = nonCyclic.filter((a) => {
+      const shared = a.hexKeys.filter((k) => currentHexSet.has(k));
+      return shared.every((k) => {
+        const t = getTerrain(k);
+        return t !== "water" && t !== "lake";
+      });
+    });
+
+    if (nonInterior.length === 0) break;
+
     // Terminate: any neighbor touches water or lake (ignoring the origin lake we're flowing out of)
-    const terminals = nonCyclic.filter((a) =>
+    const terminals = nonInterior.filter((a) =>
       a.hexKeys.some((k) => isTerminal(getTerrain(k)) && !originLakeKeys?.has(k)),
     );
     if (terminals.length > 0) {
@@ -682,14 +910,14 @@ function traceRiverCorners(
     }
 
     // Terminate: any neighbor is already on another river (tributary junction)
-    const junctions = nonCyclic.filter((a) => allRiverCorners.has(a.key));
+    const junctions = nonInterior.filter((a) => allRiverCorners.has(a.key));
     if (junctions.length > 0) {
       corners.push(rngPick(rng, junctions).key);
       break;
     }
 
     // Normal step: terrain-descent bias — pick lowest-scoring candidate(s), break ties randomly
-    const scored = nonCyclic.map((c) => ({
+    const scored = nonInterior.map((c) => ({
       c,
       score: cornerScore(c.key, cornerMap, getTerrain),
     }));

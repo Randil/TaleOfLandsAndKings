@@ -35,7 +35,8 @@ export function WorldGenPanel() {
     useState<MapGenAlgorithm>("landmass-growth-v3");
 
   // Algorithm-specific params (shared by both v1 and v2 for now)
-  const [landPct, setLandPct] = useState("35");
+  const [landPct, setLandPct] = useState("60");
+  const [mountainDensityPct, setMountainDensityPct] = useState("10");
   const [minLandmassForRiver, setMinLandmassForRiver] = useState("5");
   const [hexesPerRiver, setHexesPerRiver] = useState("30");
 
@@ -50,6 +51,7 @@ export function WorldGenPanel() {
       Math.max(10, parseInt(height, 10) || 10),
     );
     const resolvedLandPct = Math.min(90, Math.max(1, parseInt(landPct, 10) || 1));
+    const resolvedMountainDensity = Math.min(100, Math.max(0, parseInt(mountainDensityPct, 10) || 0)) / 100;
     const resolvedMinLandmass = Math.max(
       1,
       parseInt(minLandmassForRiver, 10) || 1,
@@ -65,6 +67,7 @@ export function WorldGenPanel() {
       height: resolvedHeight,
       mapGenAlgorithm: algorithm,
       minLandFraction: resolvedLandPct / 100,
+      mountainDensity: resolvedMountainDensity,
       minLandmassForRiver: resolvedMinLandmass,
       hexesPerRiver: resolvedHexesPerRiver,
     });
@@ -106,6 +109,7 @@ export function WorldGenPanel() {
         setHeight(String(parsed.config.height));
         setAlgorithm(parsed.config.mapGenAlgorithm);
         setLandPct(String(Math.round(parsed.config.minLandFraction * 100)));
+        setMountainDensityPct(String(Math.round((parsed.config.mountainDensity ?? 0.2) * 100)));
         setMinLandmassForRiver(String(parsed.config.minLandmassForRiver));
         setHexesPerRiver(String(parsed.config.hexesPerRiver));
       } catch {
@@ -173,6 +177,15 @@ export function WorldGenPanel() {
           type="number"
           value={landPct}
           onChange={(e) => setLandPct(e.target.value)}
+        />
+      </label>
+
+      <label>
+        Mountain density (% of land)
+        <input
+          type="number"
+          value={mountainDensityPct}
+          onChange={(e) => setMountainDensityPct(e.target.value)}
         />
       </label>
 

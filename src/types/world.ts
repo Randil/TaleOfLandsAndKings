@@ -33,6 +33,7 @@ export type HexCornerKey = string;
 export interface River {
   id: string;
   corners: HexCornerKey[]; // ordered path — each consecutive pair shares a hex edge
+  largeFromIndex?: number; // index into corners from which river is "large"; 0 = entire river
 }
 
 export type MapGenAlgorithm = "landmass-growth" | "landmass-growth-v3";
@@ -43,6 +44,7 @@ export interface WorldConfig {
   height: number;
   mapGenAlgorithm: MapGenAlgorithm;
   minLandFraction: number;
+  mountainDensity: number; // max fraction of land hexes that should be mountains
   minLandmassForRiver: number;
   hexesPerRiver: number;
 }

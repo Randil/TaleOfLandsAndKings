@@ -30,6 +30,43 @@ const RIVER_HIGHLIGHT_COLORS = [
   "#d62828",
 ];
 
+function drawRiverSegments(
+  ctx: CanvasRenderingContext2D,
+  pts: { x: number; y: number }[],
+  lfi: number | undefined,
+  smallWidth: number,
+  largeWidth: number,
+): void {
+  if (lfi === undefined) {
+    // Entirely small
+    ctx.lineWidth = smallWidth;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+  } else if (lfi === 0) {
+    // Entirely large
+    ctx.lineWidth = largeWidth;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+  } else {
+    // Small headwater section
+    ctx.lineWidth = smallWidth;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i <= lfi; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+    // Large section from junction onward
+    ctx.lineWidth = largeWidth;
+    ctx.beginPath();
+    ctx.moveTo(pts[lfi].x, pts[lfi].y);
+    for (let i = lfi + 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+  }
+}
+
 interface Props {
   world: World;
 }
@@ -125,17 +162,14 @@ export function HexGrid({ world }: Props) {
 
     // Draw rivers (normal)
     ctx.strokeStyle = "#7ec8e3";
-    ctx.lineWidth = 1.5;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     for (let ri = 0; ri < world.rivers.length; ri++) {
       if (highlightedRiverIndices.has(ri)) continue;
       const pts = riverPoints[ri];
       if (!pts) continue;
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-      ctx.stroke();
+      const lfi = world.rivers[ri].largeFromIndex;
+      drawRiverSegments(ctx, pts, lfi, 1.5, 3);
     }
 
     // Draw highlighted rivers on top
@@ -145,11 +179,8 @@ export function HexGrid({ world }: Props) {
       if (!pts) continue;
       ctx.strokeStyle =
         RIVER_HIGHLIGHT_COLORS[colorIdx % RIVER_HIGHLIGHT_COLORS.length];
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-      ctx.stroke();
+      const lfi = world.rivers[ri].largeFromIndex;
+      drawRiverSegments(ctx, pts, lfi, 2, 4);
       colorIdx++;
     }
 
