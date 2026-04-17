@@ -1,5 +1,6 @@
 import { useRef, useCallback, useEffect, useMemo } from "react";
 import type { World, Terrain } from "../types/world";
+import type { MapMode } from "../store/uiStore";
 import {
   hexToPixel,
   hexCorners,
@@ -8,7 +9,11 @@ import {
   hexCornerToPixel,
   hexKey,
   pixelToHex,
+  NEIGHBOR_DIRS,
+  sharedEdgePixels,
 } from "../game/hexMath";
+
+const SEA_TERRAINS = new Set<Terrain>(["water", "coast"]);
 
 const TERRAIN_COLORS: Record<Terrain, string> = {
   plains: "#c8d98a",
@@ -20,6 +25,24 @@ const TERRAIN_COLORS: Record<Terrain, string> = {
   water: "#3a6ea8",
   lake: "#7ab8d4",
 };
+
+// blue(1) → green(5-6) → red(10)
+function climateColor(value: number): string {
+  const t = (Math.min(10, Math.max(1, value)) - 1) / 9;
+  let r: number, g: number, b: number;
+  if (t <= 0.5) {
+    const s = t / 0.5;
+    r = Math.round(59 + (34 - 59) * s);
+    g = Math.round(130 + (197 - 130) * s);
+    b = Math.round(246 + (94 - 246) * s);
+  } else {
+    const s = (t - 0.5) / 0.5;
+    r = Math.round(34 + (239 - 34) * s);
+    g = Math.round(197 + (68 - 197) * s);
+    b = Math.round(94 + (68 - 94) * s);
+  }
+  return `rgb(${r},${g},${b})`;
+}
 
 const RIVER_HIGHLIGHT_COLORS = [
   "#ff6b35",
@@ -75,11 +98,15 @@ function drawRiverSegments(
 interface Props {
   world: World;
   onHoverHex?: (key: string | null) => void;
+  mapMode: MapMode;
 }
 
-export function HexGrid({ world, onHoverHex }: Props) {
+export function HexGrid({ world, onHoverHex, mapMode }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const transformRef = useRef({ x: 0, y: 0, scale: 1 });
+  // Inverse of the transform used in the last draw — kept in sync with the canvas,
+  // not with transformRef (which may be ahead by one RAF cycle after zoom/pan).
+  const hitInverseRef = useRef<DOMMatrix | null>(null);
   const hoveredHexKeyRef = useRef<string | null>(null);
   const dragStart = useRef<{
     mx: number;
@@ -97,12 +124,14 @@ export function HexGrid({ world, onHoverHex }: Props) {
   );
   const bounds = useMemo(() => hexBounds(allCoords, HEX_SIZE), [allCoords]);
 
-  // Build lookup: hexKey → river indices
+  // Build lookup: hexKey → river indices (only hexes that share a river edge)
   const riversByHexKey = useMemo(() => {
     const map = new Map<string, number[]>();
     world.rivers.forEach((river, ri) => {
-      for (const cornerKey of river.corners) {
-        for (const hk of cornerKey.split("|")) {
+      for (let ci = 0; ci < river.corners.length - 1; ci++) {
+        const set1 = new Set(river.corners[ci].split("|"));
+        for (const hk of river.corners[ci + 1].split("|")) {
+          if (!set1.has(hk)) continue;
           if (!map.has(hk)) map.set(hk, []);
           const arr = map.get(hk)!;
           if (arr[arr.length - 1] !== ri) arr.push(ri);
@@ -135,7 +164,7 @@ export function HexGrid({ world, onHoverHex }: Props) {
     const { x, y, scale } = transformRef.current;
     const hoveredHexKey = hoveredHexKeyRef.current;
     const highlightedRiverIndices = new Set<number>(
-      riversByHexKey.get(hoveredHexKey ?? "") ?? [],
+      mapMode === "rivers" ? (riversByHexKey.get(hoveredHexKey ?? "") ?? []) : [],
     );
 
     const dpr = window.devicePixelRatio || 1;
@@ -150,6 +179,11 @@ export function HexGrid({ world, onHoverHex }: Props) {
     ctx.scale(scale, scale);
     ctx.translate(-bounds.minX, -bounds.minY);
 
+    // Capture canvas→world inverse for hit testing (tied to this frame's transform)
+    const m = ctx.getTransform();
+    m.invertSelf();
+    hitInverseRef.current = m;
+
     // Draw hex fills + borders
     for (const hex of Object.values(world.hexes)) {
       const { x: hx, y: hy } = hexToPixel(hex.q, hex.r, HEX_SIZE);
@@ -159,11 +193,33 @@ export function HexGrid({ world, onHoverHex }: Props) {
         ctx.lineTo(hx + corners[i].x, hy + corners[i].y);
       }
       ctx.closePath();
-      ctx.fillStyle = TERRAIN_COLORS[hex.terrain];
+      ctx.fillStyle =
+        mapMode === "climate" && hex.climate != null
+          ? climateColor(hex.climate)
+          : TERRAIN_COLORS[hex.terrain];
       ctx.fill();
       ctx.strokeStyle = "#00000033";
       ctx.lineWidth = 0.5;
       ctx.stroke();
+    }
+
+    // Draw land/sea borders
+    ctx.strokeStyle = "#1a3a5c";
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = "square";
+    for (const hex of Object.values(world.hexes)) {
+      if (SEA_TERRAINS.has(hex.terrain)) continue;
+      for (const [dq, dr] of NEIGHBOR_DIRS) {
+        const nk = hexKey(hex.q + dq, hex.r + dr);
+        const neighbor = world.hexes[nk];
+        if (!neighbor || !SEA_TERRAINS.has(neighbor.terrain)) continue;
+        const edge = sharedEdgePixels(hex.q, hex.r, hex.q + dq, hex.r + dr);
+        if (!edge) continue;
+        ctx.beginPath();
+        ctx.moveTo(edge.x1, edge.y1);
+        ctx.lineTo(edge.x2, edge.y2);
+        ctx.stroke();
+      }
     }
 
     // Draw rivers (normal)
@@ -193,7 +249,7 @@ export function HexGrid({ world, onHoverHex }: Props) {
     }
 
     ctx.restore();
-  }, [world, bounds, corners, riverPoints, riversByHexKey]);
+  }, [world, bounds, corners, riverPoints, riversByHexKey, mapMode]);
 
   const scheduleDraw = useCallback(() => {
     if (rafRef.current !== null) return;
@@ -250,14 +306,18 @@ export function HexGrid({ world, onHoverHex }: Props) {
         return;
       }
 
-      // Hit-test: invert canvas transform to get world-space coords
+      // Hit-test: map mouse CSS pixels → canvas pixels → world coords via stored inverse
       const canvas = canvasRef.current;
       if (!canvas) return;
+      const hit = hitInverseRef.current;
+      if (!hit) return;
       const rect = canvas.getBoundingClientRect();
-      const { x, y, scale } = transformRef.current;
-      const cx = (e.clientX - rect.left - x) / scale + bounds.minX;
-      const cy = (e.clientY - rect.top - y) / scale + bounds.minY;
-      const { q, r } = pixelToHex(cx, cy, HEX_SIZE);
+      const dpr = window.devicePixelRatio || 1;
+      const worldPt = hit.transformPoint({
+        x: (e.clientX - rect.left) * dpr,
+        y: (e.clientY - rect.top) * dpr,
+      });
+      const { q, r } = pixelToHex(worldPt.x, worldPt.y, HEX_SIZE);
       const hk = hexKey(q, r);
       const next = world.hexes[hk] ? hk : null;
       if (next !== hoveredHexKeyRef.current) {
@@ -266,7 +326,7 @@ export function HexGrid({ world, onHoverHex }: Props) {
         scheduleDraw();
       }
     },
-    [bounds, world.hexes, scheduleDraw],
+    [world.hexes, scheduleDraw],
   );
 
   const onMouseUp = useCallback(() => {

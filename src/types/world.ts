@@ -8,11 +8,15 @@ export type Terrain =
   | "water"
   | "lake";
 
+export type RiverSize = "small" | "large" | "veryLarge";
+
 export interface Hex {
   q: number;
   r: number;
   regionId: string;
   terrain: Terrain;
+  climate?: number; // 1 (very cold) to 10 (very hot), assigned during world gen
+  riverSize?: RiverSize; // largest river bordering this hex
 }
 
 export interface Region {

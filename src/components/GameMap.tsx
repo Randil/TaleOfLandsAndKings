@@ -5,6 +5,7 @@ import { HexGrid } from "./HexGrid";
 export function GameMap() {
   const world = useWorldStore((s) => s.world);
   const setHoveredHexKey = useUiStore((s) => s.setHoveredHexKey);
+  const mapMode = useUiStore((s) => s.mapMode);
 
   if (!world) {
     return (
@@ -16,7 +17,7 @@ export function GameMap() {
 
   return (
     <div className="game-map">
-      <HexGrid world={world} onHoverHex={setHoveredHexKey} />
+      <HexGrid world={world} onHoverHex={setHoveredHexKey} mapMode={mapMode} />
     </div>
   );
 }

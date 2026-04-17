@@ -1,16 +1,14 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect } from "react";
 import { generateWorld } from "../game/mapGen";
 import { useWorldStore } from "../store/worldStore";
 import { useUiStore } from "../store/uiStore";
+import type { MapMode } from "../store/uiStore";
 import type { World, MapGenAlgorithm } from "../types/world";
 
 const ALGORITHMS: { value: MapGenAlgorithm; label: string }[] = [
   { value: "landmass-growth", label: "Landmass Growth" },
   { value: "landmass-growth-v3", label: "Landmass Growth v3" },
 ];
-
-type RiverSize = "Small" | "Large" | "Very Large";
-const RIVER_SIZE_RANK: Record<RiverSize, number> = { Small: 1, Large: 2, "Very Large": 3 };
 
 function isValidWorld(obj: unknown): obj is World {
   if (typeof obj !== "object" || obj === null) return false;
@@ -32,6 +30,8 @@ export function WorldGenPanel() {
   const { world, phase, logEntries, setWorld, clearWorld, appendLog, clearLog } =
     useWorldStore();
   const hoveredHexKey = useUiStore((s) => s.hoveredHexKey);
+  const mapMode = useUiStore((s) => s.mapMode);
+  const setMapMode = useUiStore((s) => s.setMapMode);
 
   const [seed, setSeed] = useState(() => String(Math.floor(Math.random() * 999999)));
   const [width, setWidth] = useState("80");
@@ -53,28 +53,6 @@ export function WorldGenPanel() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [logEntries]);
 
-  // Build hex → max river size map whenever world changes
-  const hexRiverSizes = useMemo(() => {
-    const map = new Map<string, RiverSize>();
-    if (!world) return map;
-    for (const river of world.rivers) {
-      for (let ci = 0; ci < river.corners.length; ci++) {
-        const size: RiverSize =
-          river.veryLargeFromIndex !== undefined && ci >= river.veryLargeFromIndex
-            ? "Very Large"
-            : river.largeFromIndex !== undefined && ci >= river.largeFromIndex
-              ? "Large"
-              : "Small";
-        for (const hk of river.corners[ci].split("|")) {
-          const existing = map.get(hk);
-          if (!existing || RIVER_SIZE_RANK[size] > RIVER_SIZE_RANK[existing]) {
-            map.set(hk, size);
-          }
-        }
-      }
-    }
-    return map;
-  }, [world]);
 
   function handleGenerate() {
     const resolvedSeed = Math.max(0, parseInt(seed, 10) || 0);
@@ -165,7 +143,7 @@ export function WorldGenPanel() {
   const hoveredHex = world && hoveredHexKey ? world.hexes[hoveredHexKey] : null;
   const hoveredRegion =
     hoveredHex && world ? world.regions[hoveredHex.regionId] : null;
-  const hoveredRiverSize = hoveredHexKey ? (hexRiverSizes.get(hoveredHexKey) ?? null) : null;
+  const hoveredRiverSize = hoveredHex?.riverSize ?? null;
 
   const logSection = (
     <div className="panel-section">
@@ -289,6 +267,20 @@ export function WorldGenPanel() {
         Save to File
       </button>
 
+      <div className="panel-section">
+        <div className="panel-section-title">Map Mode</div>
+        <label>
+          <select
+            value={mapMode}
+            onChange={(e) => setMapMode(e.target.value as MapMode)}
+          >
+            <option value="terrain">Terrain</option>
+            <option value="rivers">Rivers Highlight</option>
+            <option value="climate">Climate</option>
+          </select>
+        </label>
+      </div>
+
       {logSection}
 
       <div className="panel-section">
@@ -312,7 +304,13 @@ export function WorldGenPanel() {
             <div className="hex-inspector__row">
               <span className="hex-inspector__label">River</span>
               <span className="hex-inspector__value">
-                {hoveredRiverSize ?? "None"}
+                {hoveredRiverSize === "veryLarge" ? "Very Large" : hoveredRiverSize === "large" ? "Large" : hoveredRiverSize === "small" ? "Small" : "None"}
+              </span>
+            </div>
+            <div className="hex-inspector__row">
+              <span className="hex-inspector__label">Climate</span>
+              <span className="hex-inspector__value">
+                {hoveredHex.climate != null ? hoveredHex.climate : "—"}
               </span>
             </div>
           </div>

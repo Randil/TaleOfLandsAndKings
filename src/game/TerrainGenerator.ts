@@ -148,6 +148,9 @@ export class TerrainGenerator {
     while (landCount < targetLandHexes) {
       const clusterSize = rngInt(this.rng, 1, 7);
       let [prevQ, prevR] = allCoords[Math.floor(this.rng() * totalHexes)];
+      while (terrainMap.get(hexKey(prevQ, prevR)) !== "water") {
+        [prevQ, prevR] = allCoords[Math.floor(this.rng() * totalHexes)];
+      }
 
       for (let c = 0; c < clusterSize && landCount < targetLandHexes; c++) {
         let startQ!: number;
@@ -170,7 +173,11 @@ export class TerrainGenerator {
               break;
             }
           }
-          if (!found) [startQ, startR] = allCoords[Math.floor(this.rng() * totalHexes)];
+          if (!found) {
+            do {
+              [startQ, startR] = allCoords[Math.floor(this.rng() * totalHexes)];
+            } while (terrainMap.get(hexKey(startQ, startR)) !== "water");
+          }
         }
 
         const size = rngInt(this.rng, 1, 20);

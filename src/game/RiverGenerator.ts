@@ -34,6 +34,8 @@ export class RiverGenerator {
     this.generateForLandmasses();
     this.classifyLarge();
     this.classifyVeryLarge();
+    this.enlargeLakes();
+    this.generateDeltas();
     return this.rivers;
   }
 
@@ -148,10 +150,15 @@ export class RiverGenerator {
     for (let ri = 0; ri < this.rivers.length; ri++) {
       const river = this.rivers[ri];
 
-      // Rule 1: lake source — first corner touches a lake hex
+      // Rule 1: lake source — size of source lake determines initial river size
       const firstHexes = this.cornerMap.get(river.corners[0]);
-      if (firstHexes?.some((k) => this.getTerrain(k) === "lake")) {
-        river.largeFromIndex = 0;
+      const sourceLakeHex = firstHexes?.find((k) => this.getTerrain(k) === "lake");
+      if (sourceLakeHex) {
+        const lakeSize = this.floodFillLake(sourceLakeHex).size;
+        if (lakeSize >= 3) {
+          river.largeFromIndex = 0;
+          if (lakeSize > 4) river.veryLargeFromIndex = 0;
+        }
         continue;
       }
 
@@ -177,6 +184,7 @@ export class RiverGenerator {
     for (let ri = 0; ri < this.rivers.length; ri++) {
       const river = this.rivers[ri];
       if (river.largeFromIndex === undefined) continue;
+      if (river.veryLargeFromIndex !== undefined) continue; // already set from lake source
 
       for (let ci = river.largeFromIndex + 1; ci < river.corners.length; ci++) {
         const tributaries = this._terminalCorners.get(river.corners[ci]);
@@ -438,6 +446,190 @@ export class RiverGenerator {
         break; // one outlet per lake group per invocation
       }
     }
+  }
+
+  // ─── Lake Enlargement ────────────────────────────────────────────────────────
+
+  private enlargeLakes(): void {
+    for (const river of this.rivers) {
+      const lastIdx = river.corners.length - 1;
+      const lastHexes = this.cornerMap.get(river.corners[lastIdx]);
+      const lakeHex = lastHexes?.find((k) => this.getTerrain(k) === "lake");
+      if (!lakeHex) continue;
+
+      let expansions = 1;
+      if (river.veryLargeFromIndex !== undefined && lastIdx >= river.veryLargeFromIndex) {
+        expansions = 4;
+      } else if (river.largeFromIndex !== undefined && lastIdx >= river.largeFromIndex) {
+        expansions = 2;
+      }
+
+      for (let i = 0; i < expansions; i++) {
+        this.expandLakeOnce(lakeHex);
+      }
+    }
+  }
+
+  private expandLakeOnce(lakeHexKey: string): void {
+    const lakeGroup = this.floodFillLake(lakeHexKey);
+    const eligible: string[] = [];
+    const checked = new Set<string>();
+
+    for (const lk of lakeGroup) {
+      const sep = lk.indexOf(",");
+      const q = parseInt(lk.slice(0, sep), 10);
+      const r = parseInt(lk.slice(sep + 1), 10);
+      for (const [nq, nr] of hexNeighbors(q, r)) {
+        const nKey = hexKey(nq, nr);
+        if (checked.has(nKey)) continue;
+        checked.add(nKey);
+
+        const t = this.getTerrain(nKey);
+        if (t === "lake" || t === "water") continue;
+        if (!this.coordSet.has(nKey)) continue;
+
+        const bordersWater = hexNeighbors(nq, nr).some(
+          ([nnq, nnr]) => this.getTerrain(hexKey(nnq, nnr)) === "water",
+        );
+        if (bordersWater) continue;
+
+        const bordersRiver = hexCornerTriplets(nq, nr).some(
+          (triplet) => this.allRiverCorners.has(triplet.join("|")),
+        );
+        if (bordersRiver) continue;
+
+        eligible.push(nKey);
+      }
+    }
+
+    if (eligible.length === 0) return;
+
+    const chosen = rngPick(this.rng, eligible);
+    if (this.hexes[chosen]) {
+      this.hexes[chosen].terrain = "lake";
+      this.hexes[chosen].regionId = "water";
+      this.onLog?.(`Lake expanded into ${chosen}`);
+    }
+  }
+
+  // ─── River Deltas ────────────────────────────────────────────────────────────
+
+  private generateDeltas(): void {
+    const baseRivers = [...this.rivers];
+
+    for (const river of baseRivers) {
+      if (river.largeFromIndex === undefined) continue;
+
+      const n = river.corners.length;
+      if (n < 3) continue;
+
+      const lastCorner = river.corners[n - 1];
+      const lastHexes = this.cornerMap.get(lastCorner);
+      if (!lastHexes) continue;
+
+      // Must drain to ocean (not lake)
+      if (!lastHexes.some((k) => this.getTerrain(k) === "water")) continue;
+
+      // All non-ocean hexes at mouth must be plains
+      const landAtMouth = lastHexes.filter((k) => this.getTerrain(k) !== "water");
+      if (!landAtMouth.every((k) => this.getTerrain(k) === "plains")) continue;
+
+      // Target ocean: water tiles at mouth + their water neighbors
+      const targetOcean = new Set<string>();
+      for (const k of lastHexes) {
+        if (this.getTerrain(k) !== "water") continue;
+        targetOcean.add(k);
+        const sep = k.indexOf(",");
+        const q = parseInt(k.slice(0, sep), 10);
+        const r = parseInt(k.slice(sep + 1), 10);
+        for (const [nq, nr] of hexNeighbors(q, r)) {
+          const nk = hexKey(nq, nr);
+          if (this.getTerrain(nk) === "water") targetOcean.add(nk);
+        }
+      }
+
+      const branchCount = river.veryLargeFromIndex !== undefined ? 2 : 1;
+      let generated = 0;
+
+      for (const offset of [1, 2]) {
+        if (generated >= branchCount) break;
+        const idx = n - 1 - offset;
+        if (idx < 0) continue;
+
+        const startCorner = river.corners[idx];
+        const deltaCorners = this.traceDeltaBranch(startCorner, targetOcean, 4);
+        if (deltaCorners && deltaCorners.length >= 2 && this.validateRiver(deltaCorners)) {
+          this.commitRiver(deltaCorners);
+          this.onLog?.(`Delta branch from ${startCorner} (${deltaCorners.length - 1} segments)`);
+          generated++;
+        }
+      }
+    }
+  }
+
+  private traceDeltaBranch(
+    startCorner: string,
+    targetOceanTiles: Set<string>,
+    maxSteps: number,
+  ): string[] | null {
+    const corners: string[] = [startCorner];
+    const visited = new Set<string>([startCorner]);
+    let current = startCorner;
+
+    for (let step = 0; step < maxSteps; step++) {
+      const currentHexes = this.cornerMap.get(current);
+      if (!currentHexes) return null;
+
+      const adjTriplets = adjacentCornerTriplets(
+        currentHexes[0],
+        currentHexes[1],
+        currentHexes[2],
+      );
+
+      const candidates = adjTriplets
+        .map((trip) => ({ key: trip.join("|"), hexKeys: trip }))
+        .filter((a) => !visited.has(a.key) && !this.allRiverCorners.has(a.key));
+
+      if (candidates.length === 0) return null;
+
+      // Exclude steps where the shared hex with current corner is water/lake
+      const currentHexSet = new Set(currentHexes);
+      const nonInterior = candidates.filter((a) => {
+        const shared = a.hexKeys.filter((k) => currentHexSet.has(k));
+        return shared.every((k) => {
+          const t = this.getTerrain(k);
+          return t !== "water" && t !== "lake";
+        });
+      });
+
+      if (nonInterior.length === 0) return null;
+
+      // Terminate if any candidate touches a target ocean tile
+      const terminals = nonInterior.filter((a) =>
+        a.hexKeys.some((k) => targetOceanTiles.has(k)),
+      );
+      if (terminals.length > 0) {
+        corners.push(rngPick(this.rng, terminals).key);
+        return corners;
+      }
+
+      // Continue only through flat terrain (no mountains/hills)
+      const flatCandidates = nonInterior.filter((a) =>
+        a.hexKeys.every((k) => {
+          const t = this.getTerrain(k);
+          return t !== "mountains" && t !== "hills";
+        }),
+      );
+
+      if (flatCandidates.length === 0) return null;
+
+      const next = rngPick(this.rng, flatCandidates);
+      corners.push(next.key);
+      visited.add(next.key);
+      current = next.key;
+    }
+
+    return null;
   }
 
   // When a river loops back on itself, convert 1–3 adjacent land hexes to lake
