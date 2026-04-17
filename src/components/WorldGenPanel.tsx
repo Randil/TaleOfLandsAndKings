@@ -3,7 +3,7 @@ import { generateWorld } from "../game/mapGen";
 import { useWorldStore } from "../store/worldStore";
 import { useUiStore } from "../store/uiStore";
 import type { MapMode } from "../store/uiStore";
-import type { World, MapGenAlgorithm } from "../types/world";
+import type { World, MapGenAlgorithm, City } from "../types/world";
 
 const ALGORITHMS: { value: MapGenAlgorithm; label: string }[] = [
   { value: "landmass-growth", label: "Landmass Growth" },
@@ -30,6 +30,7 @@ export function WorldGenPanel() {
   const { world, phase, logEntries, setWorld, clearWorld, appendLog, clearLog } =
     useWorldStore();
   const hoveredHexKey = useUiStore((s) => s.hoveredHexKey);
+  const cursorPos = useUiStore((s) => s.cursorPos);
   const mapMode = useUiStore((s) => s.mapMode);
   const setMapMode = useUiStore((s) => s.setMapMode);
 
@@ -41,6 +42,7 @@ export function WorldGenPanel() {
   const [mountainDensityPct, setMountainDensityPct] = useState("10");
   const [minLandmassForRiver, setMinLandmassForRiver] = useState("5");
   const [hexesPerRiver, setHexesPerRiver] = useState("30");
+  const [hexesPerCity, setHexesPerCity] = useState("200");
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -63,6 +65,7 @@ export function WorldGenPanel() {
       Math.min(100, Math.max(0, parseInt(mountainDensityPct, 10) || 0)) / 100;
     const resolvedMinLandmass = Math.max(1, parseInt(minLandmassForRiver, 10) || 1);
     const resolvedHexesPerRiver = Math.max(1, parseInt(hexesPerRiver, 10) || 1);
+    const resolvedHexesPerCity = Math.max(1, parseInt(hexesPerCity, 10) || 200);
 
     clearLog();
     genStartRef.current = Date.now();
@@ -82,6 +85,7 @@ export function WorldGenPanel() {
         mountainDensity: resolvedMountainDensity,
         minLandmassForRiver: resolvedMinLandmass,
         hexesPerRiver: resolvedHexesPerRiver,
+        hexesPerCity: resolvedHexesPerCity,
       },
       onLog,
     );
@@ -131,6 +135,7 @@ export function WorldGenPanel() {
         );
         setMinLandmassForRiver(String(parsed.config.minLandmassForRiver));
         setHexesPerRiver(String(parsed.config.hexesPerRiver));
+        setHexesPerCity(String(parsed.config.hexesPerCity ?? 200));
       } catch {
         setLoadError("Failed to parse file. Make sure it is a valid JSON world file.");
       }
@@ -144,6 +149,8 @@ export function WorldGenPanel() {
   const hoveredRegion =
     hoveredHex && world ? world.regions[hoveredHex.regionId] : null;
   const hoveredRiverSize = hoveredHex?.riverSize ?? null;
+  const hoveredCity: City | undefined =
+    hoveredHexKey && world ? world.cities.find((c) => c.hexKey === hoveredHexKey) : undefined;
 
   const logSection = (
     <div className="panel-section">
@@ -236,6 +243,15 @@ export function WorldGenPanel() {
           />
         </label>
 
+        <label>
+          Hexes per city
+          <input
+            type="number"
+            value={hexesPerCity}
+            onChange={(e) => setHexesPerCity(e.target.value)}
+          />
+        </label>
+
         <button onClick={handleGenerate}>Generate</button>
 
         <button onClick={handleLoadClick}>Load from File</button>
@@ -256,6 +272,26 @@ export function WorldGenPanel() {
 
   // Phase: playing
   return (
+    <>
+    {hoveredCity && cursorPos && (
+      <div
+        style={{
+          position: "fixed",
+          left: cursorPos.x + 14,
+          top: cursorPos.y - 28,
+          background: "rgba(20,20,20,0.85)",
+          color: "#fff",
+          fontSize: 11,
+          padding: "2px 7px",
+          borderRadius: 3,
+          pointerEvents: "none",
+          zIndex: 1000,
+          whiteSpace: "nowrap",
+        }}
+      >
+        {hoveredCity.name}
+      </div>
+    )}
     <aside className="world-gen-panel">
       <h2>World Map</h2>
 
@@ -277,6 +313,8 @@ export function WorldGenPanel() {
             <option value="terrain">Terrain</option>
             <option value="rivers">Rivers Highlight</option>
             <option value="climate">Climate</option>
+            <option value="fertility">Fertility</option>
+            <option value="settler-attraction">Settler Attraction</option>
           </select>
         </label>
       </div>
@@ -313,11 +351,41 @@ export function WorldGenPanel() {
                 {hoveredHex.climate != null ? hoveredHex.climate : "—"}
               </span>
             </div>
+            <div className="hex-inspector__row">
+              <span className="hex-inspector__label">Fertility</span>
+              <span className="hex-inspector__value">
+                {hoveredHex.currentFertility != null
+                  ? hoveredHex.currentFertility !== hoveredHex.baseFertility
+                    ? `${hoveredHex.currentFertility} (base: ${hoveredHex.baseFertility})`
+                    : hoveredHex.currentFertility
+                  : "—"}
+              </span>
+            </div>
+            <div className="hex-inspector__row">
+              <span className="hex-inspector__label">Settler Attraction</span>
+              <span className="hex-inspector__value">
+                {hoveredHex.currentSettlerAttraction != null
+                  ? hoveredHex.currentSettlerAttraction === -100
+                    ? "ineligible"
+                    : hoveredHex.currentSettlerAttraction
+                  : "—"}
+              </span>
+            </div>
+            {hoveredCity && (
+              <>
+                <div className="hex-inspector__section-title">City</div>
+                <div className="hex-inspector__row">
+                  <span className="hex-inspector__label">Name</span>
+                  <span className="hex-inspector__value">{hoveredCity.name}</span>
+                </div>
+              </>
+            )}
           </div>
         ) : (
           <p className="hex-inspector__placeholder">Hover a hex to inspect</p>
         )}
       </div>
     </aside>
+    </>
   );
 }

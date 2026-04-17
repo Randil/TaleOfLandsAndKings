@@ -3,6 +3,9 @@ import { makeRng } from "./rng";
 import { TerrainGenerator } from "./TerrainGenerator";
 import { RiverGenerator } from "./RiverGenerator";
 import { ClimateGenerator } from "./ClimateGenerator";
+import { FertilityGenerator } from "./FertilityGenerator";
+import { SettlerAttractionGenerator } from "./SettlerAttractionGenerator";
+import { CityGenerator } from "./CityGenerator";
 
 export function generateWorld(config: WorldConfig, onLog?: (msg: string) => void): World {
   const rng = makeRng(config.seed);
@@ -36,6 +39,10 @@ export function generateWorld(config: WorldConfig, onLog?: (msg: string) => void
     }
   }
 
+  new FertilityGenerator(config, hexes, allCoords, coordSet, rng, onLog).generate();
+  new SettlerAttractionGenerator(config, hexes, allCoords, coordSet, onLog).generate();
+  const cities = new CityGenerator(config, hexes, allCoords, coordSet, onLog).generate();
+
   const regions = {
     water: {
       id: "water",
@@ -62,5 +69,5 @@ export function generateWorld(config: WorldConfig, onLog?: (msg: string) => void
   const hexCount = Object.keys(hexes).length;
   onLog?.(`Done — ${hexCount.toLocaleString()} hexes, ${rivers.length} rivers`);
 
-  return { config, hexes, regions, rivers };
+  return { config, hexes, regions, rivers, cities };
 }

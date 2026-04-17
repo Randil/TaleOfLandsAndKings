@@ -72,7 +72,8 @@ export class ClimateGenerator {
 
     for (const [q, r] of this.allCoords) {
       const key = hexKey(q, r);
-      if (this.hexes[key].terrain !== "water") continue;
+      const t = this.hexes[key].terrain;
+      if (t !== "water" && t !== "coast") continue;
       seaKeys.add(key);
       const belt = this.getBelt(r + Math.floor(q / 2), beltHeight, remainder);
       const delta = belt <= 3 ? 1 : belt >= 8 ? -1 : 0;
@@ -131,7 +132,10 @@ export class ClimateGenerator {
       return result;
     };
 
-    const isWater = (k: string) => this.hexes[k].terrain === "water";
+    const isWater = (k: string) => {
+      const t = this.hexes[k].terrain;
+      return t === "water" || t === "coast";
+    };
     const isLand = (k: string) => !isWater(k);
 
     this.trySpawnField(fromBelts([1, 2], isWater), +1, climateMap);

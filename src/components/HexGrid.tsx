@@ -44,6 +44,44 @@ function climateColor(value: number): string {
   return `rgb(${r},${g},${b})`;
 }
 
+// brown(0) → yellow(5) → green(10+)
+function fertilityColor(value: number): string {
+  const t = Math.min(1, Math.max(0, value) / 10);
+  let r: number, g: number, b: number;
+  if (t <= 0.5) {
+    const s = t / 0.5;
+    r = Math.round(139 + (210 - 139) * s);
+    g = Math.round(90 + (180 - 90) * s);
+    b = Math.round(43 + (40 - 43) * s);
+  } else {
+    const s = (t - 0.5) / 0.5;
+    r = Math.round(210 + (56 - 210) * s);
+    g = Math.round(180 + (142 - 180) * s);
+    b = Math.round(40 + (60 - 40) * s);
+  }
+  return `rgb(${r},${g},${b})`;
+}
+
+// ineligible → dark grey; red(≤−5) → grey(+5) → bright green(≥25)
+function settlerAttractionColor(value: number): string {
+  if (value === -100) return "#444444";
+  let r: number, g: number, b: number;
+  if (value <= -5) {
+    r = 210; g = 50; b = 50;
+  } else if (value <= 5) {
+    const s = (value + 5) / 10;
+    r = Math.round(210 + (128 - 210) * s);
+    g = Math.round(50 + (128 - 50) * s);
+    b = Math.round(50 + (128 - 50) * s);
+  } else {
+    const s = Math.min(1, (value - 5) / 20);
+    r = Math.round(128 + (20 - 128) * s);
+    g = Math.round(128 + (210 - 128) * s);
+    b = Math.round(128 + (50 - 128) * s);
+  }
+  return `rgb(${r},${g},${b})`;
+}
+
 const RIVER_HIGHLIGHT_COLORS = [
   "#ff6b35",
   "#e63946",
@@ -154,6 +192,12 @@ export function HexGrid({ world, onHoverHex, mapMode }: Props) {
     [world.rivers],
   );
 
+  const citiesByHexKey = useMemo(() => {
+    const map = new Map<string, string>(); // hexKey → city name
+    for (const city of world.cities) map.set(city.hexKey, city.name);
+    return map;
+  }, [world.cities]);
+
   // Main draw — reads transform and hoveredHexKey from refs, no React state deps
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -196,7 +240,11 @@ export function HexGrid({ world, onHoverHex, mapMode }: Props) {
       ctx.fillStyle =
         mapMode === "climate" && hex.climate != null
           ? climateColor(hex.climate)
-          : TERRAIN_COLORS[hex.terrain];
+          : mapMode === "fertility" && hex.currentFertility != null
+            ? fertilityColor(hex.currentFertility)
+            : mapMode === "settler-attraction" && hex.currentSettlerAttraction != null
+              ? settlerAttractionColor(hex.currentSettlerAttraction)
+              : TERRAIN_COLORS[hex.terrain];
       ctx.fill();
       ctx.strokeStyle = "#00000033";
       ctx.lineWidth = 0.5;
@@ -248,8 +296,47 @@ export function HexGrid({ world, onHoverHex, mapMode }: Props) {
       colorIdx++;
     }
 
+    // Draw city huts (on top of all layers, every map mode)
+    for (const [hk] of citiesByHexKey) {
+      const hex = world.hexes[hk];
+      if (!hex) continue;
+      const { x: cx, y: cy } = hexToPixel(hex.q, hex.r, HEX_SIZE);
+      const s = transformRef.current.scale;
+
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(1 / s, 1 / s); // screen-space constant size
+
+      const bw = 10; // body width
+      const bh = 7;  // body height
+      const rh = 6;  // roof height
+
+      // Roof (triangle)
+      ctx.beginPath();
+      ctx.moveTo(0, -(bh / 2 + rh));
+      ctx.lineTo(bw / 2 + 1, -bh / 2);
+      ctx.lineTo(-(bw / 2 + 1), -bh / 2);
+      ctx.closePath();
+      ctx.fillStyle = "#c0392b";
+      ctx.fill();
+      ctx.strokeStyle = "#1a1a1a";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Body (rectangle)
+      ctx.fillStyle = "#f5f0e8";
+      ctx.fillRect(-bw / 2, -bh / 2, bw, bh);
+      ctx.strokeRect(-bw / 2, -bh / 2, bw, bh);
+
+      // Door
+      ctx.fillStyle = "#8b6914";
+      ctx.fillRect(-1.5, bh / 2 - 4, 3, 4);
+
+      ctx.restore();
+    }
+
     ctx.restore();
-  }, [world, bounds, corners, riverPoints, riversByHexKey, mapMode]);
+  }, [world, bounds, corners, riverPoints, riversByHexKey, mapMode, citiesByHexKey]);
 
   const scheduleDraw = useCallback(() => {
     if (rafRef.current !== null) return;

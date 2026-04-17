@@ -10,7 +10,7 @@ const TERRAIN_HEIGHT: Record<Terrain, number> = {
   lake: 2,
   forest: 1,
   desert: 1,
-  coast: 1,
+  coast: -1,
   water: -1,
 };
 
@@ -52,7 +52,7 @@ export class RiverGenerator {
 
   private getTerrain = (k: string): Terrain => this.hexes[k]?.terrain ?? "water";
   private isSource = (t: Terrain) => t === "mountains" || t === "hills" || t === "lake";
-  private isTerminal = (t: Terrain) => t === "water" || t === "lake";
+  private isTerminal = (t: Terrain) => t === "water" || t === "lake" || t === "coast";
 
   // ─── Main Generation ────────────────────────────────────────────────────────
 
@@ -67,7 +67,7 @@ export class RiverGenerator {
       const key = hexKey(q, r);
       if (globalVisited.has(key)) continue;
       const terrain = this.hexes[key].terrain;
-      if (terrain === "water" || terrain === "lake") continue;
+      if (terrain === "water" || terrain === "lake" || terrain === "coast") continue;
 
       const mass: [number, number][] = [];
       const queue: [number, number][] = [[q, r]];
@@ -80,7 +80,7 @@ export class RiverGenerator {
           const nKey = hexKey(nq, nr);
           if (globalVisited.has(nKey) || !this.coordSet.has(nKey)) continue;
           const nt = this.hexes[nKey].terrain;
-          if (nt !== "water" && nt !== "lake") {
+          if (nt !== "water" && nt !== "lake" && nt !== "coast") {
             globalVisited.add(nKey);
             queue.push([nq, nr]);
           }
@@ -180,12 +180,28 @@ export class RiverGenerator {
   private _terminalCorners = new Map<string, number[]>();
 
   private classifyVeryLarge(): void {
-    // A large river that receives a second tributary junction becomes very large
     for (let ri = 0; ri < this.rivers.length; ri++) {
       const river = this.rivers[ri];
       if (river.largeFromIndex === undefined) continue;
       if (river.veryLargeFromIndex !== undefined) continue; // already set from lake source
 
+      // If the first junction was with an already-large/very-large river, skip straight to very large
+      const firstJunctionCorner = river.corners[river.largeFromIndex];
+      const tributariesAtFirst = this._terminalCorners.get(firstJunctionCorner);
+      if (tributariesAtFirst) {
+        const joinsLargeRiver = tributariesAtFirst.some(
+          (tri) =>
+            tri !== ri &&
+            (this.rivers[tri].largeFromIndex !== undefined ||
+              this.rivers[tri].veryLargeFromIndex !== undefined),
+        );
+        if (joinsLargeRiver) {
+          river.veryLargeFromIndex = river.largeFromIndex;
+          continue;
+        }
+      }
+
+      // Otherwise, a second tributary junction makes it very large
       for (let ci = river.largeFromIndex + 1; ci < river.corners.length; ci++) {
         const tributaries = this._terminalCorners.get(river.corners[ci]);
         if (tributaries && tributaries.some((tri) => tri !== ri)) {
@@ -355,6 +371,22 @@ export class RiverGenerator {
       }
     }
 
+    // Rule 3b: if the river ends at a junction, follow that river downstream —
+    // reject if it cycles back to the lake this river started from
+    const lastCorner = corners[corners.length - 1];
+    if (this.allRiverCorners.has(lastCorner)) {
+      const downstreamLake = this.getDownstreamLakeHex(lastCorner);
+      if (downstreamLake) {
+        if (originLakeKeys?.has(downstreamLake)) return false;
+
+        const startLakeHex = firstHexes?.find((k) => this.getTerrain(k) === "lake");
+        if (startLakeHex) {
+          const startLakeGroup = this.floodFillLake(startLakeHex);
+          if (startLakeGroup.has(downstreamLake)) return false;
+        }
+      }
+    }
+
     // Rule 4: unique hexes touched must be >=  segments
     const uniqueHexes = new Set<string>();
     for (const ck of corners) {
@@ -364,6 +396,40 @@ export class RiverGenerator {
     if (uniqueHexes.size < segments) return false;
 
     return true;
+  }
+
+  // Given a corner that sits on an existing committed river, follow the river
+  // downstream and return the first lake hex it drains into, or null if it
+  // drains to sea/coast.
+  private getDownstreamLakeHex(cornerKey: string, seen = new Set<string>()): string | null {
+    if (seen.has(cornerKey)) return null;
+    seen.add(cornerKey);
+
+    // If the corner itself already touches a lake, that IS the destination.
+    const hexes = this.cornerMap.get(cornerKey);
+    const directLake = hexes?.find((k) => this.getTerrain(k) === "lake");
+    if (directLake) return directLake;
+
+    // Find a river where this is an intermediate (through-flow) corner.
+    for (const river of this.rivers) {
+      const idx = river.corners.indexOf(cornerKey);
+      if (idx === -1 || idx === river.corners.length - 1) continue;
+
+      for (let i = idx + 1; i < river.corners.length; i++) {
+        const h = this.cornerMap.get(river.corners[i]);
+        const lk = h?.find((k) => this.getTerrain(k) === "lake");
+        if (lk) return lk;
+      }
+
+      // River's own terminus is another junction — follow the chain.
+      const last = river.corners[river.corners.length - 1];
+      if (this.allRiverCorners.has(last)) {
+        return this.getDownstreamLakeHex(last, seen);
+      }
+      return null; // drains to sea/coast
+    }
+
+    return null;
   }
 
   private floodFillLake(startKey: string): Set<string> {
@@ -488,9 +554,10 @@ export class RiverGenerator {
         if (t === "lake" || t === "water") continue;
         if (!this.coordSet.has(nKey)) continue;
 
-        const bordersWater = hexNeighbors(nq, nr).some(
-          ([nnq, nnr]) => this.getTerrain(hexKey(nnq, nnr)) === "water",
-        );
+        const bordersWater = hexNeighbors(nq, nr).some(([nnq, nnr]) => {
+          const nt = this.getTerrain(hexKey(nnq, nnr));
+          return nt === "water" || nt === "coast";
+        });
         if (bordersWater) continue;
 
         const bordersRiver = hexCornerTriplets(nq, nr).some(

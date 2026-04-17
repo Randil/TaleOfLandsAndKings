@@ -17,6 +17,10 @@ export interface Hex {
   terrain: Terrain;
   climate?: number; // 1 (very cold) to 10 (very hot), assigned during world gen
   riverSize?: RiverSize; // largest river bordering this hex
+  baseFertility?: number; // set once at world generation, never mutated
+  currentFertility?: number; // may change during gameplay; initialised to baseFertility
+  baseSettlerAttraction?: number; // −100 (ineligible) to 100, set once at world generation
+  currentSettlerAttraction?: number; // mutable during gameplay; initialised to baseSettlerAttraction
 }
 
 export interface Region {
@@ -41,6 +45,12 @@ export interface River {
   veryLargeFromIndex?: number; // index into corners from which river is "very large" (second tributary junction)
 }
 
+export interface City {
+  id: string;
+  hexKey: string;
+  name: string;
+}
+
 export type MapGenAlgorithm = "landmass-growth" | "landmass-growth-v3";
 
 export interface WorldConfig {
@@ -52,6 +62,7 @@ export interface WorldConfig {
   mountainDensity: number; // max fraction of land hexes that should be mountains
   minLandmassForRiver: number;
   hexesPerRiver: number;
+  hexesPerCity: number;
 }
 
 export interface World {
@@ -59,4 +70,5 @@ export interface World {
   hexes: Record<string, Hex>;
   regions: Record<string, Region>;
   rivers: River[];
+  cities: City[];
 }

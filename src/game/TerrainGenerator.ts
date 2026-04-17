@@ -58,6 +58,7 @@ export class TerrainGenerator {
     }
 
     this.detectLakes(terrainMap, allCoords, coordSet);
+    this.generateCoastTiles(terrainMap, allCoords, coordSet);
     return { hexes: this.buildHexes(terrainMap, allCoords), allCoords, coordSet };
   }
 
@@ -189,6 +190,7 @@ export class TerrainGenerator {
 
     this.regulateMountains(terrainMap, allCoords, coordSet);
     this.detectLakes(terrainMap, allCoords, coordSet);
+    this.generateCoastTiles(terrainMap, allCoords, coordSet);
     return { hexes: this.buildHexes(terrainMap, allCoords), allCoords, coordSet };
   }
 
@@ -202,7 +204,7 @@ export class TerrainGenerator {
     for (const [q, r] of allCoords) {
       const key = hexKey(q, r);
       const terrain = terrainMap.get(key)!;
-      const isWaterLike = terrain === "water" || terrain === "lake";
+      const isWaterLike = terrain === "water" || terrain === "lake" || terrain === "coast";
       hexes[key] = { q, r, regionId: isWaterLike ? "water" : "land", terrain };
     }
     return hexes;
@@ -459,5 +461,70 @@ export class TerrainGenerator {
         for (const k of component) terrainMap.set(k, "lake");
       }
     }
+  }
+
+  private generateCoastTiles(
+    terrainMap: Map<string, Terrain>,
+    allCoords: [number, number][],
+    coordSet: Set<string>,
+  ): void {
+    const isLand = (t: Terrain) => t !== "water" && t !== "lake" && t !== "coast";
+
+    // Pre-compute which hexes are adjacent to at least one land tile
+    const adjacentToLand = new Set<string>();
+    for (const [q, r] of allCoords) {
+      const key = hexKey(q, r);
+      if (hexNeighbors(q, r).some(([nq, nr]) => {
+        const nKey = hexKey(nq, nr);
+        return coordSet.has(nKey) && isLand(terrainMap.get(nKey)!);
+      })) {
+        adjacentToLand.add(key);
+      }
+    }
+
+    // Convert water hexes that are adjacent to land, or have a neighbor adjacent to land
+    for (const [q, r] of allCoords) {
+      const key = hexKey(q, r);
+      if (terrainMap.get(key) !== "water") continue;
+      if (adjacentToLand.has(key)) {
+        terrainMap.set(key, "coast");
+        continue;
+      }
+      const nearLand = hexNeighbors(q, r).some(([nq, nr]) => {
+        const nKey = hexKey(nq, nr);
+        return coordSet.has(nKey) && adjacentToLand.has(nKey);
+      });
+      if (nearLand) terrainMap.set(key, "coast");
+    }
+
+    // BFS propagation: remaining water hexes bordering ≥5 coast tiles also become coast
+    const queue: [number, number][] = [];
+    for (const [q, r] of allCoords) {
+      if (terrainMap.get(hexKey(q, r)) !== "water") continue;
+      const coastCount = hexNeighbors(q, r).filter(([nq, nr]) => {
+        const nKey = hexKey(nq, nr);
+        return coordSet.has(nKey) && terrainMap.get(nKey) === "coast";
+      }).length;
+      if (coastCount >= 5) queue.push([q, r]);
+    }
+
+    let qi = 0;
+    while (qi < queue.length) {
+      const [q, r] = queue[qi++];
+      const key = hexKey(q, r);
+      if (terrainMap.get(key) !== "water") continue;
+      const coastCount = hexNeighbors(q, r).filter(([nq, nr]) => {
+        const nKey = hexKey(nq, nr);
+        return coordSet.has(nKey) && terrainMap.get(nKey) === "coast";
+      }).length;
+      if (coastCount < 5) continue;
+      terrainMap.set(key, "coast");
+      for (const [nq, nr] of hexNeighbors(q, r)) {
+        const nKey = hexKey(nq, nr);
+        if (coordSet.has(nKey) && terrainMap.get(nKey) === "water") queue.push([nq, nr]);
+      }
+    }
+
+    this.onLog?.(`Coast generation done`);
   }
 }
