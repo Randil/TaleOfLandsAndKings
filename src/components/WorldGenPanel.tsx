@@ -3,11 +3,17 @@ import { generateWorld } from "../game/mapGen";
 import { useWorldStore } from "../store/worldStore";
 import { useUiStore } from "../store/uiStore";
 import type { MapMode } from "../store/uiStore";
-import type { World, MapGenAlgorithm, City } from "../types/world";
+import type { World, MapGenAlgorithm, RegionGenAlgorithm, City } from "../types/world";
+import { RESOURCE_BY_ID } from "../game/resources";
 
 const ALGORITHMS: { value: MapGenAlgorithm; label: string }[] = [
   { value: "landmass-growth", label: "Landmass Growth" },
   { value: "landmass-growth-v3", label: "Landmass Growth v3" },
+];
+
+const REGION_ALGORITHMS: { value: RegionGenAlgorithm; label: string }[] = [
+  { value: "weighted-bfs", label: "Weighted BFS" },
+  { value: "none", label: "None" },
 ];
 
 function isValidWorld(obj: unknown): obj is World {
@@ -38,11 +44,13 @@ export function WorldGenPanel() {
   const [width, setWidth] = useState("80");
   const [height, setHeight] = useState("50");
   const [algorithm, setAlgorithm] = useState<MapGenAlgorithm>("landmass-growth-v3");
+  const [regionAlgorithm, setRegionAlgorithm] = useState<RegionGenAlgorithm>("weighted-bfs");
+  const [meanRegionSize, setMeanRegionSize] = useState("15");
   const [landPct, setLandPct] = useState("60");
   const [mountainDensityPct, setMountainDensityPct] = useState("10");
   const [minLandmassForRiver, setMinLandmassForRiver] = useState("5");
   const [hexesPerRiver, setHexesPerRiver] = useState("30");
-  const [hexesPerCity, setHexesPerCity] = useState("200");
+  const [hexesPerCity, setHexesPerCity] = useState("30");
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -65,7 +73,8 @@ export function WorldGenPanel() {
       Math.min(100, Math.max(0, parseInt(mountainDensityPct, 10) || 0)) / 100;
     const resolvedMinLandmass = Math.max(1, parseInt(minLandmassForRiver, 10) || 1);
     const resolvedHexesPerRiver = Math.max(1, parseInt(hexesPerRiver, 10) || 1);
-    const resolvedHexesPerCity = Math.max(1, parseInt(hexesPerCity, 10) || 200);
+    const resolvedHexesPerCity = Math.max(1, parseInt(hexesPerCity, 10) || 30);
+    const resolvedMeanRegionSize = Math.min(500, Math.max(10, parseInt(meanRegionSize, 10) || 15));
 
     clearLog();
     genStartRef.current = Date.now();
@@ -81,6 +90,8 @@ export function WorldGenPanel() {
         width: resolvedWidth,
         height: resolvedHeight,
         mapGenAlgorithm: algorithm,
+        regionGenAlgorithm: regionAlgorithm,
+        meanRegionSize: resolvedMeanRegionSize,
         minLandFraction: resolvedLandPct / 100,
         mountainDensity: resolvedMountainDensity,
         minLandmassForRiver: resolvedMinLandmass,
@@ -129,13 +140,15 @@ export function WorldGenPanel() {
         setWidth(String(parsed.config.width));
         setHeight(String(parsed.config.height));
         setAlgorithm(parsed.config.mapGenAlgorithm);
+        setRegionAlgorithm(parsed.config.regionGenAlgorithm ?? "none");
+        setMeanRegionSize(String(parsed.config.meanRegionSize ?? 15));
         setLandPct(String(Math.round(parsed.config.minLandFraction * 100)));
         setMountainDensityPct(
           String(Math.round((parsed.config.mountainDensity ?? 0.2) * 100)),
         );
         setMinLandmassForRiver(String(parsed.config.minLandmassForRiver));
         setHexesPerRiver(String(parsed.config.hexesPerRiver));
-        setHexesPerCity(String(parsed.config.hexesPerCity ?? 200));
+        setHexesPerCity(String(parsed.config.hexesPerCity ?? 30));
       } catch {
         setLoadError("Failed to parse file. Make sure it is a valid JSON world file.");
       }
@@ -151,6 +164,8 @@ export function WorldGenPanel() {
   const hoveredRiverSize = hoveredHex?.riverSize ?? null;
   const hoveredCity: City | undefined =
     hoveredHexKey && world ? world.cities.find((c) => c.hexKey === hoveredHexKey) : undefined;
+  const hoveredResource =
+    hoveredHex?.resourceId ? RESOURCE_BY_ID[hoveredHex.resourceId] ?? null : null;
 
   const logSection = (
     <div className="panel-section">
@@ -206,6 +221,33 @@ export function WorldGenPanel() {
             ))}
           </select>
         </label>
+
+        <label>
+          Region Algorithm
+          <select
+            value={regionAlgorithm}
+            onChange={(e) => setRegionAlgorithm(e.target.value as RegionGenAlgorithm)}
+          >
+            {REGION_ALGORITHMS.map((a) => (
+              <option key={a.value} value={a.value}>
+                {a.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {regionAlgorithm === "weighted-bfs" && (
+          <label>
+            Mean region size (hexes)
+            <input
+              type="number"
+              value={meanRegionSize}
+              min={10}
+              max={500}
+              onChange={(e) => setMeanRegionSize(e.target.value)}
+            />
+          </label>
+        )}
 
         <label>
           Land coverage (%)
@@ -292,6 +334,25 @@ export function WorldGenPanel() {
         {hoveredCity.name}
       </div>
     )}
+    {mapMode === "resources" && hoveredResource && cursorPos && (
+      <div
+        style={{
+          position: "fixed",
+          left: cursorPos.x + 14,
+          top: cursorPos.y - 28,
+          background: "rgba(20,20,20,0.85)",
+          color: "#fff",
+          fontSize: 11,
+          padding: "2px 7px",
+          borderRadius: 3,
+          pointerEvents: "none",
+          zIndex: 1000,
+          whiteSpace: "nowrap",
+        }}
+      >
+        {hoveredResource.name}
+      </div>
+    )}
     <aside className="world-gen-panel">
       <h2>World Map</h2>
 
@@ -315,6 +376,10 @@ export function WorldGenPanel() {
             <option value="climate">Climate</option>
             <option value="fertility">Fertility</option>
             <option value="settler-attraction">Settler Attraction</option>
+            <option value="regions">Regions</option>
+            <option value="resources">Resources</option>
+            <option value="population">Population</option>
+            <option value="wealth">Wealth</option>
           </select>
         </label>
       </div>
@@ -332,12 +397,6 @@ export function WorldGenPanel() {
             <div className="hex-inspector__row">
               <span className="hex-inspector__label">Terrain</span>
               <span className="hex-inspector__value">{hoveredHex.terrain}</span>
-            </div>
-            <div className="hex-inspector__row">
-              <span className="hex-inspector__label">Region</span>
-              <span className="hex-inspector__value">
-                {hoveredRegion?.name ?? "—"}
-              </span>
             </div>
             <div className="hex-inspector__row">
               <span className="hex-inspector__label">River</span>
@@ -362,6 +421,16 @@ export function WorldGenPanel() {
               </span>
             </div>
             <div className="hex-inspector__row">
+              <span className="hex-inspector__label">Base Settler Attr.</span>
+              <span className="hex-inspector__value">
+                {hoveredHex.baseSettlerAttraction != null
+                  ? hoveredHex.baseSettlerAttraction === -100
+                    ? "ineligible"
+                    : hoveredHex.baseSettlerAttraction
+                  : "—"}
+              </span>
+            </div>
+            <div className="hex-inspector__row">
               <span className="hex-inspector__label">Settler Attraction</span>
               <span className="hex-inspector__value">
                 {hoveredHex.currentSettlerAttraction != null
@@ -371,6 +440,27 @@ export function WorldGenPanel() {
                   : "—"}
               </span>
             </div>
+            {hoveredResource && (
+              <>
+                <div className="hex-inspector__section-title">Resource</div>
+                <div className="hex-inspector__row">
+                  <span className="hex-inspector__label">Name</span>
+                  <span className="hex-inspector__value">{hoveredResource.name}</span>
+                </div>
+                <div className="hex-inspector__row">
+                  <span className="hex-inspector__label">Category</span>
+                  <span className="hex-inspector__value">{hoveredResource.category}</span>
+                </div>
+                <div className="hex-inspector__row">
+                  <span className="hex-inspector__label">Rarity</span>
+                  <span className="hex-inspector__value">{hoveredResource.rarity}</span>
+                </div>
+                <div className="hex-inspector__row">
+                  <span className="hex-inspector__label">Value</span>
+                  <span className="hex-inspector__value">{hoveredResource.value}</span>
+                </div>
+              </>
+            )}
             {hoveredCity && (
               <>
                 <div className="hex-inspector__section-title">City</div>
@@ -378,6 +468,68 @@ export function WorldGenPanel() {
                   <span className="hex-inspector__label">Name</span>
                   <span className="hex-inspector__value">{hoveredCity.name}</span>
                 </div>
+              </>
+            )}
+            {hoveredRegion && (
+              <>
+                <div className="hex-inspector__section-title">Region</div>
+                <div className="hex-inspector__row">
+                  <span className="hex-inspector__label">Name</span>
+                  <span className="hex-inspector__value">{hoveredRegion.name}</span>
+                </div>
+                <div className="hex-inspector__row">
+                  <span className="hex-inspector__label">Type</span>
+                  <span className="hex-inspector__value">
+                    {!hoveredRegion.isImpassable
+                      ? "Land"
+                      : ["water", "coast", "lake"].includes(hoveredRegion.dominantTerrain)
+                        ? "Ocean"
+                        : "Wasteland"}
+                  </span>
+                </div>
+                <div className="hex-inspector__row">
+                  <span className="hex-inspector__label">Terrain</span>
+                  <span className="hex-inspector__value">{hoveredRegion.dominantTerrain}</span>
+                </div>
+                <div className="hex-inspector__row">
+                  <span className="hex-inspector__label">Size</span>
+                  <span className="hex-inspector__value">{hoveredRegion.hexIds.length} hexes</span>
+                </div>
+                {!hoveredRegion.isImpassable && (
+                  <>
+                    <div className="hex-inspector__row">
+                      <span className="hex-inspector__label">Development</span>
+                      <span className="hex-inspector__value">{hoveredRegion.development}</span>
+                    </div>
+                    <div className="hex-inspector__row">
+                      <span className="hex-inspector__label">Population</span>
+                      <span className="hex-inspector__value">
+                        {hoveredRegion.population.toLocaleString()} / {hoveredRegion.maxPopulation.toLocaleString()}
+                        {" "}({Math.round(hoveredRegion.population / hoveredRegion.maxPopulation * 100)}%)
+                      </span>
+                    </div>
+                    <div className="hex-inspector__row">
+                      <span className="hex-inspector__label">Wealth</span>
+                      <span className="hex-inspector__value">{hoveredRegion.wealth.toLocaleString()}</span>
+                    </div>
+                  </>
+                )}
+                {(hoveredRegion.resourceIds?.length ?? 0) > 0 && (
+                  <div className="hex-inspector__row">
+                    <span className="hex-inspector__label">Resources</span>
+                    <span className="hex-inspector__value">
+                      {hoveredRegion.resourceIds!.map((id) => RESOURCE_BY_ID[id]?.name ?? id).join(", ")}
+                    </span>
+                  </div>
+                )}
+                {(hoveredRegion.goodIds?.length ?? 0) > 0 && (
+                  <div className="hex-inspector__row">
+                    <span className="hex-inspector__label">Goods</span>
+                    <span className="hex-inspector__value">
+                      {hoveredRegion.goodIds!.join(", ")}
+                    </span>
+                  </div>
+                )}
               </>
             )}
           </div>

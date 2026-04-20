@@ -1,6 +1,8 @@
 import { useRef, useCallback, useEffect, useMemo } from "react";
 import type { World, Terrain } from "../types/world";
 import type { MapMode } from "../store/uiStore";
+import type { ResourceCategory } from "../types/resources";
+import { RESOURCE_BY_ID } from "../game/resources";
 import {
   hexToPixel,
   hexCorners,
@@ -13,7 +15,16 @@ import {
   sharedEdgePixels,
 } from "../game/hexMath";
 
-const SEA_TERRAINS = new Set<Terrain>(["water", "coast"]);
+// Only 3 of the 6 directions — visits each hex edge exactly once
+const BORDER_DIRS: [number, number][] = [[1, 0], [1, -1], [0, -1]];
+
+const LAND_TERRAIN_SET = new Set<Terrain>(["plains", "forest", "mountains", "hills", "desert", "city"]);
+
+// Stable hue per region index using golden-angle rotation
+function regionFillColor(regionIndex: number): string {
+  const hue = (regionIndex * 137.508) % 360;
+  return `hsl(${hue}, 55%, 65%)`;
+}
 
 const TERRAIN_COLORS: Record<Terrain, string> = {
   plains: "#c8d98a",
@@ -24,6 +35,7 @@ const TERRAIN_COLORS: Record<Terrain, string> = {
   coast: "#a8c8e0",
   water: "#3a6ea8",
   lake: "#7ab8d4",
+  city: "#d4a853",
 };
 
 // blue(1) → green(5-6) → red(10)
@@ -81,6 +93,27 @@ function settlerAttractionColor(value: number): string {
   }
   return `rgb(${r},${g},${b})`;
 }
+
+// red(0) → yellow(0.5) → green(1)
+function gradientColor(t: number): string {
+  const tc = Math.min(1, Math.max(0, t));
+  let r: number, g: number;
+  if (tc <= 0.5) {
+    r = 255;
+    g = Math.round(255 * (tc / 0.5));
+  } else {
+    r = Math.round(255 * (1 - (tc - 0.5) / 0.5));
+    g = Math.round(255 - 55 * ((tc - 0.5) / 0.5));
+  }
+  return `rgb(${r},${g},0)`;
+}
+
+const RESOURCE_CATEGORY_COLORS: Record<ResourceCategory, string> = {
+  mineral: "#c2872a",
+  organic: "#3a9e4a",
+  animal:  "#c8a020",
+  arcane:  "#8a2be2",
+};
 
 const RIVER_HIGHLIGHT_COLORS = [
   "#ff6b35",
@@ -198,6 +231,36 @@ export function HexGrid({ world, onHoverHex, mapMode }: Props) {
     return map;
   }, [world.cities]);
 
+  // Stable region-index colours for "regions" map mode (golden-angle hue rotation)
+  const regionColors = useMemo(() => {
+    const map = new Map<string, string>(); // regionId → css color
+    let idx = 0;
+    for (const [id, region] of Object.entries(world.regions)) {
+      map.set(id, region.isImpassable ? "#999999" : regionFillColor(idx++));
+    }
+    return map;
+  }, [world.regions]);
+
+  const populationRange = useMemo(() => {
+    const vals = Object.values(world.regions)
+      .filter((r) => !r.isImpassable)
+      .map((r) => r.population ?? 0);
+    if (vals.length === 0) return { min: 0, max: 1 };
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+    return { min, max: max === min ? min + 1 : max };
+  }, [world.regions]);
+
+  const wealthRange = useMemo(() => {
+    const vals = Object.values(world.regions)
+      .filter((r) => !r.isImpassable)
+      .map((r) => r.wealth ?? 0);
+    if (vals.length === 0) return { min: 0, max: 1 };
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+    return { min, max: max === min ? min + 1 : max };
+  }, [world.regions]);
+
   // Main draw — reads transform and hoveredHexKey from refs, no React state deps
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -237,6 +300,7 @@ export function HexGrid({ world, onHoverHex, mapMode }: Props) {
         ctx.lineTo(hx + corners[i].x, hy + corners[i].y);
       }
       ctx.closePath();
+      const hexRegion = world.regions[hex.regionId];
       ctx.fillStyle =
         mapMode === "climate" && hex.climate != null
           ? climateColor(hex.climate)
@@ -244,23 +308,71 @@ export function HexGrid({ world, onHoverHex, mapMode }: Props) {
             ? fertilityColor(hex.currentFertility)
             : mapMode === "settler-attraction" && hex.currentSettlerAttraction != null
               ? settlerAttractionColor(hex.currentSettlerAttraction)
-              : TERRAIN_COLORS[hex.terrain];
+              : mapMode === "regions"
+                ? (regionColors.get(hex.regionId) ?? TERRAIN_COLORS[hex.terrain])
+                : mapMode === "resources"
+                  ? hex.resourceId
+                    ? (RESOURCE_CATEGORY_COLORS[RESOURCE_BY_ID[hex.resourceId]?.category] ?? TERRAIN_COLORS[hex.terrain])
+                    : TERRAIN_COLORS[hex.terrain]
+                  : mapMode === "population"
+                    ? hexRegion && !hexRegion.isImpassable
+                      ? gradientColor((hexRegion.population - populationRange.min) / (populationRange.max - populationRange.min))
+                      : "#2a2a2a"
+                    : mapMode === "wealth"
+                      ? hexRegion && !hexRegion.isImpassable
+                        ? gradientColor((hexRegion.wealth - wealthRange.min) / (wealthRange.max - wealthRange.min))
+                        : "#2a2a2a"
+                      : TERRAIN_COLORS[hex.terrain];
       ctx.fill();
       ctx.strokeStyle = "#00000033";
       ctx.lineWidth = 0.5;
       ctx.stroke();
     }
 
-    // Draw land/sea borders
-    ctx.strokeStyle = "#1a3a5c";
+    // Draw impassable stripe overlay (terrain mode only)
+    if (mapMode === "terrain") {
+      ctx.save();
+      const stripeSpacing = 5 * Math.SQRT2; // 5px perpendicular spacing
+      const extent = HEX_SIZE * 3;
+      ctx.strokeStyle = "rgba(80, 80, 80, 0.45)";
+      ctx.lineWidth = 1.5;
+      for (const hex of Object.values(world.hexes)) {
+        const region = world.regions[hex.regionId];
+        if (!region?.isImpassable) continue;
+        const { x: hx, y: hy } = hexToPixel(hex.q, hex.r, HEX_SIZE);
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(hx + corners[0].x, hy + corners[0].y);
+        for (let i = 1; i < 6; i++) ctx.lineTo(hx + corners[i].x, hy + corners[i].y);
+        ctx.closePath();
+        ctx.clip();
+        for (let d = -extent * 2; d <= extent * 2; d += stripeSpacing) {
+          ctx.beginPath();
+          ctx.moveTo(hx - extent, hy - extent + d);
+          ctx.lineTo(hx + extent, hy + extent + d);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+
+    // Pass A: solid black coastline — edge between land-terrain hex and coast hex
+    ctx.strokeStyle = "#000000";
     ctx.lineWidth = 2.5;
     ctx.lineCap = "square";
+    ctx.setLineDash([]);
     for (const hex of Object.values(world.hexes)) {
-      if (SEA_TERRAINS.has(hex.terrain)) continue;
-      for (const [dq, dr] of NEIGHBOR_DIRS) {
+      const hexIsLand = LAND_TERRAIN_SET.has(hex.terrain);
+      const hexIsCoast = hex.terrain === "coast";
+      if (!hexIsLand && !hexIsCoast) continue;
+      for (const [dq, dr] of BORDER_DIRS) {
         const nk = hexKey(hex.q + dq, hex.r + dr);
         const neighbor = world.hexes[nk];
-        if (!neighbor || !SEA_TERRAINS.has(neighbor.terrain)) continue;
+        if (!neighbor) continue;
+        const nIsLand = LAND_TERRAIN_SET.has(neighbor.terrain);
+        const nIsCoast = neighbor.terrain === "coast";
+        if (!((hexIsLand && nIsCoast) || (hexIsCoast && nIsLand))) continue;
         const edge = sharedEdgePixels(hex.q, hex.r, hex.q + dq, hex.r + dr);
         if (!edge) continue;
         ctx.beginPath();
@@ -269,6 +381,31 @@ export function HexGrid({ world, onHoverHex, mapMode }: Props) {
         ctx.stroke();
       }
     }
+
+    // Pass B: dotted region borders — all region boundaries except land/coast edges (drawn in Pass A)
+    ctx.strokeStyle = "#000000";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([3, 3]);
+    for (const hex of Object.values(world.hexes)) {
+      const hexIsLand = LAND_TERRAIN_SET.has(hex.terrain);
+      const hexIsCoast = hex.terrain === "coast";
+      for (const [dq, dr] of BORDER_DIRS) {
+        const nk = hexKey(hex.q + dq, hex.r + dr);
+        const neighbor = world.hexes[nk];
+        if (!neighbor || hex.regionId === neighbor.regionId) continue;
+        // Skip edges already drawn in Pass A
+        const nIsLand = LAND_TERRAIN_SET.has(neighbor.terrain);
+        const nIsCoast = neighbor.terrain === "coast";
+        if ((hexIsLand && nIsCoast) || (hexIsCoast && nIsLand)) continue;
+        const edge = sharedEdgePixels(hex.q, hex.r, hex.q + dq, hex.r + dr);
+        if (!edge) continue;
+        ctx.beginPath();
+        ctx.moveTo(edge.x1, edge.y1);
+        ctx.lineTo(edge.x2, edge.y2);
+        ctx.stroke();
+      }
+    }
+    ctx.setLineDash([]);
 
     // Draw rivers (normal)
     ctx.strokeStyle = "#7ec8e3";
@@ -336,7 +473,7 @@ export function HexGrid({ world, onHoverHex, mapMode }: Props) {
     }
 
     ctx.restore();
-  }, [world, bounds, corners, riverPoints, riversByHexKey, mapMode, citiesByHexKey]);
+  }, [world, bounds, corners, riverPoints, riversByHexKey, mapMode, citiesByHexKey, regionColors, populationRange, wealthRange]);
 
   const scheduleDraw = useCallback(() => {
     if (rafRef.current !== null) return;

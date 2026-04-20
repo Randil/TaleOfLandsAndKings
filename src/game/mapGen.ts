@@ -1,4 +1,4 @@
-import type { World, WorldConfig, Terrain, RiverSize } from "../types/world";
+import type { World, WorldConfig, RiverSize } from "../types/world";
 import { makeRng } from "./rng";
 import { TerrainGenerator } from "./TerrainGenerator";
 import { RiverGenerator } from "./RiverGenerator";
@@ -6,6 +6,9 @@ import { ClimateGenerator } from "./ClimateGenerator";
 import { FertilityGenerator } from "./FertilityGenerator";
 import { SettlerAttractionGenerator } from "./SettlerAttractionGenerator";
 import { CityGenerator } from "./CityGenerator";
+import { RegionGenerator } from "./RegionGenerator";
+import { ResourceGenerator } from "./ResourceGenerator";
+import { EconomyGenerator } from "./EconomyGenerator";
 
 export function generateWorld(config: WorldConfig, onLog?: (msg: string) => void): World {
   const rng = makeRng(config.seed);
@@ -16,9 +19,6 @@ export function generateWorld(config: WorldConfig, onLog?: (msg: string) => void
   const rivers = new RiverGenerator(hexes, coordSet, allCoords, config, rng, onLog).generate();
   new ClimateGenerator(config, hexes, allCoords, coordSet, rng, onLog).generate();
 
-  // Annotate each hex with the largest river that borders it.
-  // A river segment flows along the edge shared by the 2 hexes that appear
-  // in both consecutive corner triplets (intersection of the two sets of 3).
   const RIVER_SIZE_RANK: Record<RiverSize, number> = { small: 1, large: 2, veryLarge: 3 };
   for (const river of rivers) {
     for (let ci = 0; ci < river.corners.length - 1; ci++) {
@@ -42,32 +42,13 @@ export function generateWorld(config: WorldConfig, onLog?: (msg: string) => void
   new FertilityGenerator(config, hexes, allCoords, coordSet, rng, onLog).generate();
   new SettlerAttractionGenerator(config, hexes, allCoords, coordSet, onLog).generate();
   const cities = new CityGenerator(config, hexes, allCoords, coordSet, onLog).generate();
-
-  const regions = {
-    water: {
-      id: "water",
-      name: "Ocean",
-      dominantTerrain: "water" as Terrain,
-      ownerId: null,
-      hexIds: Object.keys(hexes).filter((k) => hexes[k].regionId === "water"),
-      rivers: [] as never[],
-      cities: [] as never[],
-      villages: [] as never[],
-    },
-    land: {
-      id: "land",
-      name: "Land",
-      dominantTerrain: "plains" as Terrain,
-      ownerId: null,
-      hexIds: Object.keys(hexes).filter((k) => hexes[k].regionId === "land"),
-      rivers: [] as never[],
-      cities: [] as never[],
-      villages: [] as never[],
-    },
-  };
+  const regions = new RegionGenerator(config, hexes, allCoords, rng, cities, onLog).generate();
+  new ResourceGenerator(config, hexes, regions, rng, onLog).generate();
+  new EconomyGenerator(hexes, regions, cities, rng, onLog).generate();
 
   const hexCount = Object.keys(hexes).length;
-  onLog?.(`Done — ${hexCount.toLocaleString()} hexes, ${rivers.length} rivers`);
+  const regionCount = Object.keys(regions).length;
+  onLog?.(`Done — ${hexCount.toLocaleString()} hexes, ${rivers.length} rivers, ${regionCount} regions`);
 
   return { config, hexes, regions, rivers, cities };
 }

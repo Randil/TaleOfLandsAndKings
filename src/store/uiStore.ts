@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type MapMode = "terrain" | "rivers" | "climate" | "fertility" | "settler-attraction";
+export type MapMode = "terrain" | "rivers" | "climate" | "fertility" | "settler-attraction" | "regions" | "resources" | "population" | "wealth";
 
 interface UiStore {
   hoveredHexKey: string | null;
